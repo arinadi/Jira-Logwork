@@ -153,11 +153,7 @@ export const jiraFetcher = {
           await delay(THROTTLE_MS, signal);
         }
 
-        // Skip comment fetch if no status changes found or aborted
-        if (statusChangeDates.length === 0 || signal?.aborted) {
-          if (i < allIssueKeys.length - 1 && !signal?.aborted) await delay(THROTTLE_MS, signal);
-          continue;
-        }
+        if (signal?.aborted) break;
 
         // --- Step 3: Fetch latest comment for this issue ---
         onProgress?.(i * 3 + 2, totalSteps, `[${i + 1}/${allIssueKeys.length}] Comments: ${key}`);
@@ -192,30 +188,49 @@ export const jiraFetcher = {
           globalLatestComment = adfToPlainText(comments[0].body);
         }
 
-        // Build raw events — match comment to the specific date of each status change
-        for (const sc of statusChangeDates) {
-          const dateComment = commentsByDate.get(sc.date) || globalLatestComment || summary;
-          rawEvents.push({
-            issueKey: key,
-            date: sc.date,
-            summary,
-            comment: dateComment,
-            statusChange: sc.statusChange,
-          });
-        }
-
         // --- Step 3b: Fetch existing worklogs for this issue ---
         onProgress?.(i * 3 + 3, totalSteps, `[${i + 1}/${allIssueKeys.length}] Checking existing worklogs: ${key}`);
+        await delay(THROTTLE_MS, signal);
+        
         const worklogsData = await jiraService.getIssueWorklogs(config, key, signal);
         const worklogs = worklogsData.worklogs || [];
+        const worklogDates = new Set<string>();
         
         for (const w of worklogs) {
           const wAuthor = (w.author || {}).displayName || '';
           if (wAuthor !== authorName) continue;
           
           const wDate = parseISO(w.started);
+          if (!isWithinInterval(wDate, { start, end })) continue;
+
           const wDateKey = format(wDate, 'yyyy-MM-dd');
           existingWorklogs.add(`${key}::${wDateKey}`);
+          worklogDates.add(wDateKey);
+        }
+
+        // Unified Activity Detection
+        // Combine all dates where SOMETHING happened
+        const allActivityDates = new Set<string>();
+        statusChangeDates.forEach(sc => allActivityDates.add(sc.date));
+        commentsByDate.forEach((_, date) => allActivityDates.add(date));
+        worklogDates.forEach(date => allActivityDates.add(date));
+
+        // Build raw events for each active date
+        for (const date of allActivityDates) {
+          const dateComment = commentsByDate.get(date) || globalLatestComment || summary;
+          
+          // Find all transitions for this specific date
+          const transitions = statusChangeDates
+            .filter(sc => sc.date === date)
+            .map(sc => sc.statusChange);
+
+          rawEvents.push({
+            issueKey: key,
+            date: date,
+            summary,
+            comment: dateComment,
+            statusChange: transitions.join(', '),
+          });
         }
       } catch (err) {
         if ((err as Error).name !== 'AbortError') {
