@@ -211,16 +211,23 @@ function AppContent() {
 
         {/* Sidebar - Capacity Tracker */}
         <aside className="w-96 flex flex-col gap-8 pb-8">
-          <div className="card-premium p-8 sticky top-28 overflow-hidden">
+          <div 
+            className="card-premium p-8 sticky top-28 overflow-hidden flex flex-col"
+            style={{ maxHeight: 'calc(100vh - 140px)' }}
+          >
              {/* Gradient Accent */}
             <div className="absolute top-0 right-0 w-48 h-48 bg-atlassian-blue/[0.03] rounded-full blur-[80px] -mr-24 -mt-24"></div>
             
-            <h2 className="text-2xl font-semibold text-[var(--text-main)] mb-1 flex items-center gap-2">
-              Performance
-            </h2>
-            <p className="text-pro-label mb-10">Daily Target: 8.0 Hours</p>
+            <div className="relative z-10 shrink-0">
+              <h2 className="text-2xl font-semibold text-[var(--text-main)] mb-1 flex items-center gap-2">
+                Performance
+              </h2>
+              <p className="text-pro-label mb-10">Daily Target: 8.0 Hours</p>
+            </div>
             
-            <DailyCapacityTracker entries={entries} />
+            <div className="flex-1 overflow-y-auto pr-2 relative z-10 custom-scrollbar">
+              <DailyCapacityTracker entries={entries} />
+            </div>
           </div>
           
           {isSyncing && (
