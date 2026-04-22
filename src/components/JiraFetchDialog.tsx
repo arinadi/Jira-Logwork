@@ -48,7 +48,7 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ isOpen, onClos
         setParams(prev => ({
           ...prev,
           authorName: name,
-          jql: `(assignee = "${name}" OR watcher = "${name}" OR worklogAuthor = "${name}") AND status changed during ("${prev.startDate}", "${prev.endDate}")`
+          jql: `(assignee = "${name}" OR watcher = "${name}" OR worklogAuthor = "${name}") AND status CHANGED DURING ("${prev.startDate}", "${prev.endDate}")`
         }));
       }).catch(console.error);
     }
@@ -60,7 +60,7 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ isOpen, onClos
     setParams(prev => {
       const next = { ...prev, [key]: value };
       if (key === 'startDate' || key === 'endDate' || key === 'authorName') {
-        next.jql = `(assignee = "${next.authorName}" OR watcher = "${next.authorName}" OR worklogAuthor = "${next.authorName}") AND status changed during ("${next.startDate}", "${next.endDate}")`;
+        next.jql = `(assignee = "${next.authorName}" OR watcher = "${next.authorName}" OR worklogAuthor = "${next.authorName}") AND status CHANGED DURING ("${next.startDate}", "${next.endDate}")`;
       }
       return next;
     });
