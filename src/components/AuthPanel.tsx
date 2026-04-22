@@ -11,7 +11,9 @@ export const AuthPanel: React.FC = () => {
   // Auto-open settings if disconnected or empty
   useEffect(() => {
     if (!config) {
-      setIsModalOpen(true);
+      // Use timeout to avoid cascading render warning in linter
+      const timer = setTimeout(() => setIsModalOpen(true), 0);
+      return () => clearTimeout(timer);
     }
   }, [config]);
 
