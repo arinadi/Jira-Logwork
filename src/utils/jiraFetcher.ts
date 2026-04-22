@@ -111,7 +111,7 @@ export const jiraFetcher = {
 
     // Collect raw events and track existing worklogs
     const rawEvents: RawEvent[] = [];
-    const existingWorklogs = new Set<string>(); // Tracks "issueKey::yyyy-MM-dd"
+    const existingWorklogs = new Map<string, string>(); // Tracks "issueKey::yyyy-MM-dd" -> comment
     
     // For each issue: fetch changelog, then comments, then worklogs
     for (let i = 0; i < allIssueKeys.length; i++) {
@@ -204,7 +204,9 @@ export const jiraFetcher = {
           if (!isWithinInterval(wDate, { start, end })) continue;
 
           const wDateKey = format(wDate, 'yyyy-MM-dd');
-          existingWorklogs.add(`${key}::${wDateKey}`);
+          const wComment = w.comment ? adfToPlainText(w.comment) : '';
+          
+          existingWorklogs.set(`${key}::${wDateKey}`, wComment);
           worklogDates.add(wDateKey);
         }
 
@@ -264,7 +266,7 @@ export const jiraFetcher = {
           issueKey: ev.issueKey,
           date: ev.date,
           comment: ev.comment,
-          transitions: [ev.statusChange],
+          transitions: ev.statusChange ? [ev.statusChange] : [],
         });
       }
     }
@@ -284,15 +286,22 @@ export const jiraFetcher = {
       const timeSpent = hoursToJiraTime(hoursPerTicket);
 
       for (const ticket of ticketsOnDay) {
-        // Build comment: [comment text] | Status: A → B, B → C
-        const transitionText = ticket.transitions.join(', ');
-        const commentParts = [];
-        if (ticket.comment) commentParts.push(ticket.comment);
-        commentParts.push(`Status: ${transitionText}`);
-        const finalComment = commentParts.join(' | ');
-
         const existingKey = `${ticket.issueKey}::${date}`;
-        const hasExistingWorklog = existingWorklogs.has(existingKey);
+        const existingWorklogComment = existingWorklogs.get(existingKey);
+        const hasExistingWorklog = existingWorklogComment !== undefined;
+
+        let finalComment = '';
+        if (hasExistingWorklog && existingWorklogComment) {
+          // Priority: If worklog exists, use its comment
+          finalComment = existingWorklogComment;
+        } else {
+          // Build generated comment: [comment text] | Status: A → B, B → C
+          const transitionText = ticket.transitions.join(', ');
+          const commentParts = [];
+          if (ticket.comment) commentParts.push(ticket.comment);
+          if (transitionText) commentParts.push(`Status: ${transitionText}`);
+          finalComment = commentParts.join(' | ');
+        }
 
         entries.push({
           id: crypto.randomUUID(),
