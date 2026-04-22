@@ -54,13 +54,19 @@ function adfToPlainText(adf: unknown): string {
   return result.length > 160 ? result.substring(0, 157) + '...' : result;
 }
 
+interface ADFNode {
+  type?: string;
+  text?: string;
+  content?: ADFNode[];
+}
+
 /** Deep recursive extraction specifically for Worklog comments (handles lists/nested blocks) */
 function adfToWorklogText(adf: unknown): string {
   if (!adf) return '';
   if (typeof adf === 'string') return adf;
   if (typeof adf !== 'object') return '';
 
-  const extract = (node: any): string => {
+  const extract = (node: ADFNode): string => {
     if (node.type === 'text') return node.text || '';
     if (node.content && Array.isArray(node.content)) {
       return node.content.map(extract).join(' ');
@@ -68,7 +74,7 @@ function adfToWorklogText(adf: unknown): string {
     return '';
   };
 
-  const doc = adf as { content?: any[] };
+  const doc = adf as ADFNode;
   const blocks = (doc.content || []).slice(0, 5); // Allow more blocks for worklogs
   const lines = blocks.map(block => extract(block).trim()).filter(Boolean);
   
