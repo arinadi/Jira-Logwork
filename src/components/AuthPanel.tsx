@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Settings, AlertCircle, Database, LogOut } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -6,7 +6,14 @@ import { SettingsModal } from './SettingsModal';
 
 export const AuthPanel: React.FC = () => {
   const { config, user, status, disconnect } = useAuth();
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(!config);
+
+  // Auto-open settings if disconnected or empty
+  useEffect(() => {
+    if (!config) {
+      setIsModalOpen(true);
+    }
+  }, [config]);
 
   const getInitials = (name: string) => {
     return name.split(' ').map(n => n[0]).join('').toUpperCase();
