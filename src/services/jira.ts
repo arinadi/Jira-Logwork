@@ -15,8 +15,8 @@ export const jiraService = {
   /**
    * Fetches the current user profile
    */
-  async getCurrentUser(config: AuthConfig) {
-    const response = await this.apiFetch(config, '/rest/api/3/myself');
+  async getCurrentUser(config: AuthConfig, signal?: AbortSignal) {
+    const response = await this.apiFetch(config, '/rest/api/3/myself', { signal });
     if (!response.ok) throw new Error('Failed to fetch user profile');
     return response.json();
   },
@@ -24,14 +24,14 @@ export const jiraService = {
   /**
    * Performs a paginated JQL search
    */
-  async searchIssues(config: AuthConfig, jql: string, startAt = 0) {
+  async searchIssues(config: AuthConfig, jql: string, startAt = 0, signal?: AbortSignal) {
     const queryParams = new URLSearchParams({
       jql,
       fields: 'key,summary',
       startAt: String(startAt),
       maxResults: '100',
     });
-    const response = await this.apiFetch(config, `/rest/api/3/search/jql?${queryParams.toString()}`);
+    const response = await this.apiFetch(config, `/rest/api/3/search/jql?${queryParams.toString()}`, { signal });
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`JQL search failed (${response.status}): ${errorText}`);
@@ -42,8 +42,8 @@ export const jiraService = {
   /**
    * Fetches paginated changelog for a specific issue
    */
-  async getIssueChangelog(config: AuthConfig, issueKey: string, startAt = 0) {
-    const response = await this.apiFetch(config, `/rest/api/3/issue/${issueKey}/changelog?startAt=${startAt}&maxResults=100`);
+  async getIssueChangelog(config: AuthConfig, issueKey: string, startAt = 0, signal?: AbortSignal) {
+    const response = await this.apiFetch(config, `/rest/api/3/issue/${issueKey}/changelog?startAt=${startAt}&maxResults=100`, { signal });
     if (!response.ok) throw new Error(`Failed to fetch changelog for ${issueKey}`);
     return response.json();
   },
@@ -51,8 +51,8 @@ export const jiraService = {
   /**
    * Fetches all comments for a specific issue (paginated)
    */
-  async getIssueComments(config: AuthConfig, issueKey: string, startAt = 0) {
-    const response = await this.apiFetch(config, `/rest/api/3/issue/${issueKey}/comment?startAt=${startAt}&maxResults=100&orderBy=-created`);
+  async getIssueComments(config: AuthConfig, issueKey: string, startAt = 0, signal?: AbortSignal) {
+    const response = await this.apiFetch(config, `/rest/api/3/issue/${issueKey}/comment?startAt=${startAt}&maxResults=100&orderBy=-created`, { signal });
     if (!response.ok) throw new Error(`Failed to fetch comments for ${issueKey}`);
     return response.json();
   },

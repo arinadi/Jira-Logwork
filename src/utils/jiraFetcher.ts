@@ -11,8 +11,15 @@ export interface FetchParams {
   defaultTime?: string;
 }
 
-/** Delay helper to avoid hammering Jira API */
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+/** Delay helper to avoid hammering Jira API — interruptible by signal */
+const delay = (ms: number, signal?: AbortSignal) => 
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    }, { once: true });
+  });
 
 /** Rate limit: wait this many ms between API calls */
 const THROTTLE_MS = 3000;
@@ -69,7 +76,8 @@ export const jiraFetcher = {
   async fetchEvents(
     config: AuthConfig, 
     params: FetchParams, 
-    onProgress?: (current: number, total: number, message: string) => void
+    onProgress?: (current: number, total: number, message: string) => void,
+    signal?: AbortSignal
   ): Promise<WorklogEntry[]> {
     const { jql, startDate, endDate, authorName, defaultTime = '8h' } = params;
     const start = parseISO(startDate);
@@ -80,16 +88,20 @@ export const jiraFetcher = {
     const issueMap = new Map<string, string>(); // key -> summary
     let searchStartAt = 0;
     
-    while (true) {
-      const data = await jiraService.searchIssues(config, jql, searchStartAt);
-      const issues = data.issues || [];
-      for (const issue of issues) {
-        const summary = issue.fields?.summary || issue.key;
-        issueMap.set(issue.key, summary);
+    try {
+      while (!signal?.aborted) {
+        const data = await jiraService.searchIssues(config, jql, searchStartAt, signal);
+        const issues = data.issues || [];
+        for (const issue of issues) {
+          const summary = issue.fields?.summary || issue.key;
+          issueMap.set(issue.key, summary);
+        }
+        if (data.isLast || issues.length === 0) break;
+        searchStartAt += issues.length;
+        await delay(THROTTLE_MS, signal);
       }
-      if (data.isLast || issues.length === 0) break;
-      searchStartAt += issues.length;
-      await delay(THROTTLE_MS);
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') throw err;
     }
 
     const allIssueKeys = Array.from(issueMap.keys());
@@ -101,58 +113,58 @@ export const jiraFetcher = {
     
     // For each issue: fetch changelog, then fetch comments
     for (let i = 0; i < allIssueKeys.length; i++) {
+      if (signal?.aborted) break;
       const key = allIssueKeys[i];
       const summary = issueMap.get(key) || key;
       
-      // --- Step 2: Fetch changelog ---
-      onProgress?.(i * 2 + 1, totalSteps, `[${i + 1}/${allIssueKeys.length}] Changelog: ${key}`);
-      
-      const statusChangeDates: Array<{ date: string; statusChange: string }> = [];
-      let changelogStartAt = 0;
-      
-      while (true) {
-        const historyData = await jiraService.getIssueChangelog(config, key, changelogStartAt);
-        const values = historyData.values || [];
+      try {
+        // --- Step 2: Fetch changelog ---
+        onProgress?.(i * 2 + 1, totalSteps, `[${i + 1}/${allIssueKeys.length}] Changelog: ${key}`);
         
-        for (const history of values) {
-          const author = (history.author || {}).displayName || '';
-          if (author !== authorName) continue;
+        const statusChangeDates: Array<{ date: string; statusChange: string }> = [];
+        let changelogStartAt = 0;
+        
+        while (!signal?.aborted) {
+          const historyData = await jiraService.getIssueChangelog(config, key, changelogStartAt, signal);
+          const values = historyData.values || [];
+          
+          for (const history of values) {
+            const author = (history.author || {}).displayName || '';
+            if (author !== authorName) continue;
 
-          const createdDate = parseISO(history.created);
-          if (!isWithinInterval(createdDate, { start, end })) continue;
+            const createdDate = parseISO(history.created);
+            if (!isWithinInterval(createdDate, { start, end })) continue;
 
-          for (const item of history.items) {
-            if (item.field !== 'status') continue;
+            for (const item of history.items) {
+              if (item.field !== 'status') continue;
 
-            const dateKey = format(createdDate, 'yyyy-MM-dd');
-
-            statusChangeDates.push({
-              date: dateKey,
-              statusChange: `${item.fromString || 'None'} → ${item.toString || 'None'}`,
-            });
+              const dateKey = format(createdDate, 'yyyy-MM-dd');
+              statusChangeDates.push({
+                date: dateKey,
+                statusChange: `${item.fromString || 'None'} → ${item.toString || 'None'}`,
+              });
+            }
           }
+
+          if (changelogStartAt + values.length >= (historyData.total ?? 0) || values.length === 0) break;
+          changelogStartAt += values.length;
+          await delay(THROTTLE_MS, signal);
         }
 
-        if (changelogStartAt + values.length >= (historyData.total ?? 0) || values.length === 0) break;
-        changelogStartAt += values.length;
-        await delay(THROTTLE_MS);
-      }
+        // Skip comment fetch if no status changes found or aborted
+        if (statusChangeDates.length === 0 || signal?.aborted) {
+          if (i < allIssueKeys.length - 1 && !signal?.aborted) await delay(THROTTLE_MS, signal);
+          continue;
+        }
 
-      // Skip comment fetch if no status changes found for this issue
-      if (statusChangeDates.length === 0) {
-        if (i < allIssueKeys.length - 1) await delay(THROTTLE_MS);
-        continue;
-      }
+        // --- Step 3: Fetch latest comment for this issue ---
+        onProgress?.(i * 2 + 2, totalSteps, `[${i + 1}/${allIssueKeys.length}] Comments: ${key}`);
+        await delay(THROTTLE_MS, signal);
 
-      // --- Step 3: Fetch latest comment for this issue ---
-      onProgress?.(i * 2 + 2, totalSteps, `[${i + 1}/${allIssueKeys.length}] Comments: ${key}`);
-      await delay(THROTTLE_MS);
-
-      // Build a map: date -> latest comment text (by author, on that date)
-      const commentsByDate = new Map<string, string>();
-      let globalLatestComment = '';
-      try {
-        const commentsData = await jiraService.getIssueComments(config, key);
+        // Build a map: date -> latest comment text (by author, on that date)
+        const commentsByDate = new Map<string, string>();
+        let globalLatestComment = '';
+        const commentsData = await jiraService.getIssueComments(config, key, 0, signal);
         const comments = commentsData.comments || []; // ordered -created (newest first)
         
         for (const c of comments) {
@@ -177,27 +189,32 @@ export const jiraFetcher = {
         if (!globalLatestComment && comments.length > 0) {
           globalLatestComment = adfToPlainText(comments[0].body);
         }
-      } catch {
-        console.warn(`Could not fetch comments for ${key}, using summary.`);
+
+        // Build raw events — match comment to the specific date of each status change
+        for (const sc of statusChangeDates) {
+          const dateComment = commentsByDate.get(sc.date) || globalLatestComment || summary;
+          rawEvents.push({
+            issueKey: key,
+            date: sc.date,
+            summary,
+            comment: dateComment,
+            statusChange: sc.statusChange,
+          });
+        }
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') {
+          console.warn(`Error processing ${key}, skipping:`, err);
+        } else {
+          break; // Stop processing issues on abort
+        }
       }
 
-      // Build raw events — match comment to the specific date of each status change
-      for (const sc of statusChangeDates) {
-        const dateComment = commentsByDate.get(sc.date) || globalLatestComment || summary;
-        rawEvents.push({
-          issueKey: key,
-          date: sc.date,
-          summary,
-          comment: dateComment,
-          statusChange: sc.statusChange,
-        });
-      }
-
-      if (i < allIssueKeys.length - 1) await delay(THROTTLE_MS);
+      if (i < allIssueKeys.length - 1 && !signal?.aborted) await delay(THROTTLE_MS, signal);
     }
 
     // Step 4 — Smart Report: merge transitions + distribute time
-    onProgress?.(totalSteps, totalSteps, `Building smart report from ${rawEvents.length} events...`);
+    const finalMsg = signal?.aborted ? 'Scan stopped. Processing partial results...' : 'Building smart report...';
+    onProgress?.(totalSteps, totalSteps, finalMsg);
 
     const dailyHours = parseTimeToHours(defaultTime);
 

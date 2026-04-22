@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Search, Calendar, User, Loader2, Download, Table as TableIcon, Zap } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { jiraService } from '../services/jira';
@@ -38,6 +38,7 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ isOpen, onClos
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0, message: '' });
   const [results, setResults] = useState<WorklogEntry[] | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Pre-fill user info
   useEffect(() => {
@@ -69,15 +70,35 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ isOpen, onClos
     if (!config) return;
     setIsLoading(true);
     setResults(null);
+    setProgress({ current: 0, total: 0, message: 'Initializing scan...' });
+    
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
-      const entries = await jiraFetcher.fetchEvents(config, params, (current, total, message) => {
-        setProgress({ current, total, message });
-      });
+      const entries = await jiraFetcher.fetchEvents(
+        config, 
+        params, 
+        (current, total, message) => {
+          setProgress({ current, total, message });
+        },
+        controller.signal
+      );
       setResults(entries);
-    } catch {
-      alert('Error fetching Jira events. Check your JQL or connection.');
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') {
+        alert('Error fetching Jira events. Check your JQL or connection.');
+      }
     } finally {
       setIsLoading(false);
+      abortControllerRef.current = null;
+    }
+  };
+
+  const handleCancel = () => {
+    if (abortControllerRef.current) {
+      setProgress(prev => ({ ...prev, message: 'Stopping scan... please wait.' }));
+      abortControllerRef.current.abort();
     }
   };
 
@@ -197,6 +218,14 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ isOpen, onClos
                   style={{ width: `${progress.total > 0 ? (progress.current / progress.total) * 100 : 0}%`, boxShadow: '0 0 15px rgba(0,82,204,0.3)' }}
                 />
               </div>
+
+              <button
+                onClick={handleCancel}
+                className="mt-6 px-10 py-3 rounded-2xl border border-red-500/20 text-red-500 font-semibold hover:bg-red-500/5 transition-all active:scale-95 flex items-center gap-2"
+              >
+                <X className="w-4 h-4" />
+                Stop Scan
+              </button>
             </div>
           )}
 
@@ -206,8 +235,19 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ isOpen, onClos
                 <Search className="w-10 h-10" />
               </div>
               <div className="space-y-3">
-                <h3 className="text-4xl font-semibold tracking-tight" style={{ color: 'var(--text-main)' }}>{results.length} Events Discovered</h3>
-                <p className="font-medium text-lg max-w-sm mx-auto" style={{ color: 'var(--text-subtle)', opacity: 0.7 }}>We analyzed your history and generated {results.length} worklog entries.</p>
+                <h3 className="text-4xl font-semibold tracking-tight" style={{ color: 'var(--text-main)' }}>{results.length} Entries Discovered</h3>
+                <p className="font-medium text-lg max-w-sm mx-auto" style={{ color: 'var(--text-subtle)', opacity: 0.7 }}>We analyzed your history and generated {results.length} smart worklogs.</p>
+              </div>
+
+              <div className="flex gap-4 w-full max-w-lg mx-auto">
+                <div className="flex-1 p-4 rounded-2xl border" style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-color)' }}>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-[#0052cc] mb-1">Tickets</p>
+                  <p className="text-2xl font-bold" style={{ color: 'var(--text-main)' }}>{new Set(results.map(r => r.issueKey)).size}</p>
+                </div>
+                <div className="flex-1 p-4 rounded-2xl border" style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-color)' }}>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-[#0052cc] mb-1">Days</p>
+                  <p className="text-2xl font-bold" style={{ color: 'var(--text-main)' }}>{new Set(results.map(r => r.date)).size}</p>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-6 w-full max-w-lg mx-auto">
