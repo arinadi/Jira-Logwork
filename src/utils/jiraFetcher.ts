@@ -38,7 +38,9 @@ function hoursToJiraTime(hours: number): string {
 
 /** Extract plain text from Atlassian Document Format (ADF) — first 2 lines only */
 function adfToPlainText(adf: unknown): string {
-  if (!adf || typeof adf !== 'object') return '';
+  if (!adf) return '';
+  if (typeof adf === 'string') return adf;
+  if (typeof adf !== 'object') return '';
   const doc = adf as { content?: Array<{ content?: Array<{ text?: string }> }> };
   const lines: string[] = [];
   for (const block of (doc.content || []).slice(0, 2)) {
@@ -291,9 +293,10 @@ export const jiraFetcher = {
         const hasExistingWorklog = existingWorklogComment !== undefined;
 
         let finalComment = '';
-        if (hasExistingWorklog && existingWorklogComment) {
-          // Priority: If worklog exists, use its comment
-          finalComment = existingWorklogComment;
+        if (hasExistingWorklog) {
+          // Priority: If worklog exists, use its comment (even if empty string)
+          // But if it's completely empty, we can use the ticket's latest comment as a better fallback
+          finalComment = existingWorklogComment || ticket.comment;
         } else {
           // Build generated comment: [comment text] | Status: A → B, B → C
           const transitionText = ticket.transitions.join(', ');
