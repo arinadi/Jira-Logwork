@@ -3,7 +3,6 @@
 **Experience the Future of Jira Logging.**
 Say goodbye to the clunky native Jira worklog interface. Our **Worklog IDE** provides a premium, spreadsheet-like experience that turns hours of data entry into a few clicks. Whether you're importing a CSV from a local tracker or auto-generating logs from your issue history, this is the tool you've been waiting for.
 
-**Key SEO Features & Benefits:**
 - 📦 **Jira Bulk Worklog Upload**: Import thousands of rows from any CSV file with our intelligent fuzzy-mapping engine.
 - 🕵️ **Jira History Scrapper**: Automatically generate worklogs by scanning issue status changes. No more manual memory recalls!
 - 🔒 **Zero-Trust Security**: Your Jira API Tokens and credentials stay 100% in your browser's local storage. We never see your data.

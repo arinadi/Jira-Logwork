@@ -25,16 +25,17 @@ export const jiraService = {
    * Performs a paginated JQL search
    */
   async searchIssues(config: AuthConfig, jql: string, startAt = 0) {
-    const response = await this.apiFetch(config, `/rest/api/3/search`, {
-      method: 'POST',
-      body: JSON.stringify({
-        jql,
-        fields: ['key', 'summary'],
-        startAt,
-        maxResults: 100,
-      }),
+    const queryParams = new URLSearchParams({
+      jql,
+      fields: 'key,summary',
+      startAt: String(startAt),
+      maxResults: '100',
     });
-    if (!response.ok) throw new Error('JQL search failed');
+    const response = await this.apiFetch(config, `/rest/api/3/search/jql?${queryParams.toString()}`);
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`JQL search failed (${response.status}): ${errorText}`);
+    }
     return response.json();
   },
 
@@ -44,6 +45,15 @@ export const jiraService = {
   async getIssueChangelog(config: AuthConfig, issueKey: string, startAt = 0) {
     const response = await this.apiFetch(config, `/rest/api/3/issue/${issueKey}/changelog?startAt=${startAt}&maxResults=100`);
     if (!response.ok) throw new Error(`Failed to fetch changelog for ${issueKey}`);
+    return response.json();
+  },
+
+  /**
+   * Fetches all comments for a specific issue (paginated)
+   */
+  async getIssueComments(config: AuthConfig, issueKey: string, startAt = 0) {
+    const response = await this.apiFetch(config, `/rest/api/3/issue/${issueKey}/comment?startAt=${startAt}&maxResults=100&orderBy=-created`);
+    if (!response.ok) throw new Error(`Failed to fetch comments for ${issueKey}`);
     return response.json();
   },
 

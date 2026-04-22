@@ -55,11 +55,22 @@ export const EditableCell: React.FC<EditableCellProps> = ({
   return (
     <div 
       className={twMerge(
-        "relative w-full h-full min-h-[40px] flex items-center px-4 transition-all duration-200", 
-        isEditing ? "bg-white shadow-inner ring-1 ring-atlassian-blue z-10" : "hover:bg-slate-50/80 cursor-text",
-        isInvalid && !isEditing ? "bg-red-50 ring-1 ring-red-200" : "",
+        "relative w-full h-full min-h-[40px] flex items-center px-4 transition-all duration-200 cursor-text", 
+        isEditing ? "z-10" : "",
         className
       )}
+      style={{
+        backgroundColor: isEditing 
+          ? 'var(--bg-surface)' 
+          : isInvalid && !isEditing 
+            ? 'rgba(239, 68, 68, 0.05)' 
+            : 'transparent',
+        boxShadow: isEditing 
+          ? 'inset 0 1px 2px rgba(0,0,0,0.06), 0 0 0 1px #0052cc' 
+          : isInvalid && !isEditing 
+            ? '0 0 0 1px rgba(239, 68, 68, 0.2)' 
+            : 'none',
+      }}
       onClick={() => setIsEditing(true)}
       title={isInvalid ? errorMessage : undefined}
     >
@@ -67,23 +78,24 @@ export const EditableCell: React.FC<EditableCellProps> = ({
         <input
           ref={inputRef}
           type={type}
-          className="w-full bg-transparent outline-none text-atlassian-text font-medium"
+          className="w-full bg-transparent outline-none font-medium"
+          style={{ color: 'var(--text-main)' }}
           value={localValue}
           onChange={(e) => setLocalValue(e.target.value)}
           onBlur={handleBlur}
           onKeyDown={handleKeyDown}
         />
       ) : (
-        <span className={clsx(
-          "w-full truncate",
-          isInvalid ? "text-red-600 font-semibold" : "text-atlassian-text"
-        )}>
-          {value || <span className="text-gray-300 italic opacity-50">Empty</span>}
+        <span 
+          className={clsx("w-full truncate")}
+          style={{ color: isInvalid ? '#dc2626' : 'var(--text-main)', fontWeight: isInvalid ? 600 : undefined }}
+        >
+          {value || <span style={{ color: 'var(--text-subtle)', opacity: 0.4, fontStyle: 'italic' }}>Empty</span>}
         </span>
       )}
       
       {isInvalid && !isEditing && (
-        <div className="absolute right-2 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]"></div>
+        <div className="absolute right-2 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#dc2626', boxShadow: '0 0 8px rgba(239,68,68,0.5)' }}></div>
       )}
     </div>
   );

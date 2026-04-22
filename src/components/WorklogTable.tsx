@@ -12,6 +12,16 @@ interface WorklogTableProps {
   onSyncRow: (entry: WorklogEntry) => void;
 }
 
+const thStyle: React.CSSProperties = {
+  color: 'var(--text-subtle)',
+  opacity: 0.7,
+};
+
+const headerBg: React.CSSProperties = {
+  backgroundColor: 'var(--bg-input)',
+  borderColor: 'var(--border-color)',
+};
+
 export const WorklogTable: React.FC<WorklogTableProps> = ({ 
   entries, 
   onUpdate, 
@@ -22,87 +32,93 @@ export const WorklogTable: React.FC<WorklogTableProps> = ({
   if (entries.length === 0) return null;
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-700 rounded-2xl border" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}>
       <table className="w-full text-left border-collapse table-fixed">
         <thead>
-          <tr className="bg-slate-50 border-b border-gray-200">
-            <th className="w-40 px-4 py-3 text-xs font-bold text-atlassian-text-subtle uppercase tracking-wider">Issue Key</th>
-            <th className="w-40 px-4 py-3 text-xs font-bold text-atlassian-text-subtle uppercase tracking-wider">Date</th>
-            <th className="w-32 px-4 py-3 text-xs font-bold text-atlassian-text-subtle uppercase tracking-wider">Time</th>
-            <th className="px-4 py-3 text-xs font-bold text-atlassian-text-subtle uppercase tracking-wider">Comment</th>
-            <th className="w-32 px-4 py-3 text-xs font-bold text-atlassian-text-subtle uppercase tracking-wider">Status</th>
-            <th className="w-24 px-4 py-3 text-xs font-bold text-atlassian-text-subtle uppercase tracking-wider text-right">
+          <tr style={headerBg}>
+            <th className="w-40 px-6 py-4 text-[10px] font-bold uppercase tracking-[0.15em]" style={thStyle}>Issue Key</th>
+            <th className="w-40 px-6 py-4 text-[10px] font-bold uppercase tracking-[0.15em]" style={thStyle}>Date</th>
+            <th className="w-32 px-6 py-4 text-[10px] font-bold uppercase tracking-[0.15em]" style={thStyle}>Time</th>
+            <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-[0.15em]" style={thStyle}>Comment</th>
+            <th className="w-32 px-6 py-4 text-[10px] font-bold uppercase tracking-[0.15em]" style={thStyle}>Status</th>
+            <th className="w-24 px-6 py-4">
               <button 
                 onClick={onClearAll}
-                className="flex items-center gap-1 ml-auto text-red-500 hover:text-red-700 transition-colors uppercase"
-                title="Clear all rows"
+                className="flex items-center gap-1 ml-auto text-red-500/60 hover:text-red-500 transition-all uppercase text-[10px] font-black tracking-widest active:scale-90"
+                title="Clear Workspace"
               >
-                <XCircle className="w-4 h-4" />
+                <XCircle className="w-3.5 h-3.5" />
                 Clear
               </button>
             </th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-100">
+        <tbody>
           {entries.map((entry) => {
             const errors = validateEntry(entry);
             const isSyncing = entry.status === 'syncing';
             const isSynced = entry.status === 'synced';
             
             return (
-              <tr key={entry.id} className={`transition-colors group ${isSyncing ? 'bg-atlassian-blue/5' : 'hover:bg-slate-50/50'}`}>
-                <td className="p-0 border-r border-gray-50">
+              <tr
+                key={entry.id}
+                className="group transition-all duration-300 hover:opacity-90"
+                style={{ borderBottom: '1px solid var(--border-color)' }}
+              >
+                <td className="p-0" style={{ borderRight: '1px solid var(--border-color)' }}>
                   <EditableCell 
                     value={entry.issueKey}
                     onSave={(val) => onUpdate(entry.id, { issueKey: val.toUpperCase().trim() })}
                     isInvalid={!!errors.issueKey}
                     errorMessage={errors.issueKey}
-                    className="font-semibold text-atlassian-blue"
+                    className="font-semibold text-atlassian-blue px-6"
                   />
                 </td>
-                <td className="p-0 border-r border-gray-50">
+                <td className="p-0" style={{ borderRight: '1px solid var(--border-color)' }}>
                   <EditableCell 
                     value={entry.date}
                     type="date"
                     onSave={(val) => onUpdate(entry.id, { date: val })}
                     isInvalid={!!errors.date}
                     errorMessage={errors.date}
+                    className="px-6"
                   />
                 </td>
-                <td className="p-0 border-r border-gray-50">
+                <td className="p-0" style={{ borderRight: '1px solid var(--border-color)' }}>
                   <EditableCell 
                     value={entry.timeSpent}
                     onSave={(val) => onUpdate(entry.id, { timeSpent: val })}
                     isInvalid={!!errors.timeSpent}
                     errorMessage={errors.timeSpent}
-                    className="font-bold whitespace-nowrap"
+                    className="font-semibold whitespace-nowrap px-6"
                   />
                 </td>
-                <td className="p-0 border-r border-gray-50">
+                <td className="p-0" style={{ borderRight: '1px solid var(--border-color)' }}>
                   <EditableCell 
                     value={entry.comment}
                     onSave={(val) => onUpdate(entry.id, { comment: val })}
-                    className="text-atlassian-text-subtle"
+                    className="px-6 italic"
                   />
                 </td>
-                <td className="px-4 py-2 border-r border-gray-50">
+                <td className="px-6 py-4" style={{ borderRight: '1px solid var(--border-color)' }}>
                   <StatusBadge status={entry.status} error={entry.errorMessage || Object.values(errors)[0]} />
                 </td>
-                <td className="px-4 py-2 text-right">
-                  <div className={`flex items-center justify-end gap-1 transition-opacity ${isSyncing ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                <td className="px-6 py-4 text-right">
+                  <div className={`flex items-center justify-end gap-2 transition-all duration-300 ${isSyncing ? 'opacity-100' : 'opacity-0 translate-x-2 group-hover:opacity-100 group-hover:translate-x-0'}`}>
                     <button 
                       onClick={() => onRemove(entry.id)}
                       disabled={isSyncing || isSynced}
-                      className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-all disabled:opacity-30 disabled:hover:bg-transparent"
-                      title="Remove row"
+                      className="p-2 rounded-xl transition-all disabled:opacity-30 active:scale-90 hover:opacity-70"
+                      style={{ color: 'var(--text-subtle)' }}
+                      title="Remove Row"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
                     <button 
                       onClick={() => onSyncRow(entry)}
                       disabled={isSyncing || isSynced || Object.keys(errors).length > 0}
-                      className="p-1.5 text-atlassian-blue hover:bg-atlassian-blue/5 rounded-md transition-all disabled:opacity-30"
-                      title="Sync this row"
+                      className="p-2 text-atlassian-blue hover:bg-atlassian-blue/10 rounded-xl transition-all disabled:opacity-30 active:scale-90"
+                      title="Sync Worklog"
                     >
                       {isSyncing ? <Loader2 className="w-4 h-4 animate-spin text-atlassian-blue" /> : <Play className="w-4 h-4" fill="currentColor" />}
                     </button>
@@ -118,37 +134,52 @@ export const WorklogTable: React.FC<WorklogTableProps> = ({
 };
 
 const StatusBadge: React.FC<{ status: WorklogEntry['status'], error?: string }> = ({ status, error }) => {
+  const base: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '4px 10px',
+    borderRadius: '9999px',
+    fontSize: '10px',
+    fontWeight: 700,
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+  };
+
   switch (status) {
     case 'ready':
       if (error) {
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 text-[10px] font-bold uppercase border border-amber-100" title={error}>
-            Invalid
+          <span style={{ ...base, backgroundColor: 'rgba(245, 158, 11, 0.08)', color: '#d97706', border: '1px solid rgba(245, 158, 11, 0.15)' }} title={error}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#f59e0b' }} className="animate-pulse" />
+            Warning
           </span>
         );
       }
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[10px] font-bold uppercase border border-slate-200">
-          Ready
+        <span style={{ ...base, backgroundColor: 'var(--bg-input)', color: 'var(--text-subtle)', border: '1px solid var(--border-color)' }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: 'var(--text-subtle)', opacity: 0.4 }} />
+          Awaiting
         </span>
       );
     case 'syncing':
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold uppercase border border-blue-200 animate-pulse">
-          Syncing...
+        <span style={{ ...base, backgroundColor: 'rgba(0, 82, 204, 0.08)', color: '#0052cc', border: '1px solid rgba(0, 82, 204, 0.15)' }} className="animate-pulse">
+          <Loader2 className="w-3 h-3 animate-spin" />
+          Syncing
         </span>
       );
     case 'synced':
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold uppercase border border-emerald-200 shadow-sm shadow-emerald-100">
+        <span style={{ ...base, backgroundColor: 'rgba(16, 185, 129, 0.08)', color: '#059669', border: '1px solid rgba(16, 185, 129, 0.15)' }}>
           <CheckCircle2 className="w-3 h-3" />
-          Synced
+          Success
         </span>
       );
     case 'failed':
     case 'error':
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-[10px] font-bold uppercase border border-red-200" title={error}>
+        <span style={{ ...base, backgroundColor: 'rgba(239, 68, 68, 0.08)', color: '#dc2626', border: '1px solid rgba(239, 68, 68, 0.15)' }} title={error}>
           <AlertCircle className="w-3 h-3" />
           Failed
         </span>
