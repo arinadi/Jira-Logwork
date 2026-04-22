@@ -3,6 +3,7 @@ import { Trash2, Play, CheckCircle2, AlertCircle, XCircle, Loader2 } from 'lucid
 import type { WorklogEntry } from '../types/worklog';
 import { EditableCell } from './DataGrid/EditableCell';
 import { validateEntry } from '../utils/validation';
+import { useAuth } from '../context/AuthContext';
 
 interface WorklogTableProps {
   entries: WorklogEntry[];
@@ -29,6 +30,8 @@ export const WorklogTable: React.FC<WorklogTableProps> = ({
   onClearAll,
   onSyncRow
 }) => {
+  const { config } = useAuth();
+  
   if (entries.length === 0) return null;
 
   return (
@@ -72,6 +75,7 @@ export const WorklogTable: React.FC<WorklogTableProps> = ({
                     isInvalid={!!errors.issueKey}
                     errorMessage={errors.issueKey}
                     className="font-semibold text-atlassian-blue px-6"
+                    href={config?.domain ? `https://${config.domain}/browse/${entry.issueKey}` : undefined}
                   />
                 </td>
                 <td className="p-0" style={{ borderRight: '1px solid var(--border-color)' }}>
@@ -97,7 +101,8 @@ export const WorklogTable: React.FC<WorklogTableProps> = ({
                   <EditableCell 
                     value={entry.comment}
                     onSave={(val) => onUpdate(entry.id, { comment: val })}
-                    className="px-6 italic"
+                    className="px-6 italic py-2"
+                    type="textarea"
                   />
                 </td>
                 <td className="px-6 py-4" style={{ borderRight: '1px solid var(--border-color)' }}>

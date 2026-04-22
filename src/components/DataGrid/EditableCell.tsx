@@ -8,7 +8,8 @@ interface EditableCellProps {
   isInvalid?: boolean;
   errorMessage?: string;
   className?: string;
-  type?: 'text' | 'date';
+  type?: 'text' | 'date' | 'textarea';
+  href?: string;
 }
 
 export const EditableCell: React.FC<EditableCellProps> = ({ 
@@ -17,11 +18,12 @@ export const EditableCell: React.FC<EditableCellProps> = ({
   isInvalid, 
   errorMessage, 
   className,
-  type = 'text'
+  type = 'text',
+  href
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [localValue, setLocalValue] = useState(value);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -31,9 +33,11 @@ export const EditableCell: React.FC<EditableCellProps> = ({
   useEffect(() => {
     if (isEditing && inputRef.current) {
       inputRef.current.focus();
-      inputRef.current.select();
+      if (type !== 'textarea') {
+        (inputRef.current as HTMLInputElement).select();
+      }
     }
-  }, [isEditing]);
+  }, [isEditing, type]);
 
   const handleBlur = () => {
     setIsEditing(false);
@@ -44,6 +48,7 @@ export const EditableCell: React.FC<EditableCellProps> = ({
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
+      e.preventDefault();
       handleBlur();
     }
     if (e.key === 'Escape') {
@@ -75,19 +80,45 @@ export const EditableCell: React.FC<EditableCellProps> = ({
       title={isInvalid ? errorMessage : undefined}
     >
       {isEditing ? (
-        <input
-          ref={inputRef}
-          type={type}
-          className="w-full bg-transparent outline-none font-medium"
-          style={{ color: 'var(--text-main)' }}
-          value={localValue}
-          onChange={(e) => setLocalValue(e.target.value)}
-          onBlur={handleBlur}
-          onKeyDown={handleKeyDown}
-        />
+        type === 'textarea' ? (
+          <textarea
+            ref={inputRef as React.RefObject<HTMLTextAreaElement>}
+            className="w-full bg-transparent outline-none font-medium resize-none min-h-[40px] py-2"
+            style={{ color: 'var(--text-main)', wordWrap: 'break-word', overflow: 'hidden' }}
+            value={localValue}
+            onChange={(e) => {
+              const val = e.target.value.replace(/[\r\n]+/g, ' ');
+              setLocalValue(val);
+            }}
+            onBlur={handleBlur}
+            onKeyDown={handleKeyDown}
+          />
+        ) : (
+          <input
+            ref={inputRef as React.RefObject<HTMLInputElement>}
+            type={type}
+            className="w-full bg-transparent outline-none font-medium"
+            style={{ color: 'var(--text-main)' }}
+            value={localValue}
+            onChange={(e) => setLocalValue(e.target.value)}
+            onBlur={handleBlur}
+            onKeyDown={handleKeyDown}
+          />
+        )
+      ) : href ? (
+        <a 
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={clsx("w-full truncate hover:underline")}
+          style={{ color: isInvalid ? '#dc2626' : 'var(--text-main)', fontWeight: isInvalid ? 600 : undefined }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {value || <span style={{ color: 'var(--text-subtle)', opacity: 0.4, fontStyle: 'italic' }}>Empty</span>}
+        </a>
       ) : (
         <span 
-          className={clsx("w-full truncate")}
+          className={clsx("w-full truncate", type === 'textarea' && "break-words whitespace-normal")}
           style={{ color: isInvalid ? '#dc2626' : 'var(--text-main)', fontWeight: isInvalid ? 600 : undefined }}
         >
           {value || <span style={{ color: 'var(--text-subtle)', opacity: 0.4, fontStyle: 'italic' }}>Empty</span>}
