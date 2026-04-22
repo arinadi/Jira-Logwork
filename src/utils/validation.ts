@@ -28,28 +28,37 @@ export const validateEntry = (entry: WorklogEntry): ValidationError => {
 };
 
 /**
- * Parses duration strings like "8h", "30m", "1.5h" into decimal hours.
+ * Parses duration strings like "8h", "30m", "1.5h", or "2h 40m" into decimal hours.
  */
 export const parseDurationToHours = (duration: string): number | null => {
   if (!duration) return null;
   
   const clean = duration.toLowerCase().trim();
   
-  // Simple "8h" or "1.5h"
-  if (clean.endsWith('h')) {
-    const val = parseFloat(clean.replace('h', ''));
+  // Regex to match hour and minute components
+  const hMatch = clean.match(/(\d+(?:\.\d+)?)h/);
+  const mMatch = clean.match(/(\d+(?:\.\d+)?)m/);
+  
+  let totalHours = 0;
+  let matched = false;
+  
+  if (hMatch) {
+    totalHours += parseFloat(hMatch[1]);
+    matched = true;
+  }
+  
+  if (mMatch) {
+    totalHours += parseFloat(mMatch[1]) / 60;
+    matched = true;
+  }
+  
+  // If neither h nor m matched, try parsing as a naked number (hours)
+  if (!matched) {
+    const val = parseFloat(clean);
     return isNaN(val) ? null : val;
   }
   
-  // Simple "30m"
-  if (clean.endsWith('m')) {
-    const val = parseFloat(clean.replace('m', ''));
-    return isNaN(val) ? null : val / 60;
-  }
-  
-  // Naked number (assume hours)
-  const val = parseFloat(clean);
-  return isNaN(val) ? null : val;
+  return totalHours;
 };
 
 /**

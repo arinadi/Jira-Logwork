@@ -2,6 +2,7 @@ import type { AuthConfig } from '../types/auth';
 import type { WorklogEntry } from '../types/worklog';
 import { jiraService } from '../services/jira';
 import { format, parseISO, isWithinInterval } from 'date-fns';
+import { parseDurationToHours } from './validation';
 
 export interface FetchParams {
   jql: string;
@@ -231,7 +232,7 @@ export const jiraFetcher = {
     const finalMsg = signal?.aborted ? 'Scan stopped. Processing partial results...' : 'Building smart report...';
     onProgress?.(totalSteps, totalSteps, finalMsg);
 
-    const dailyHours = parseTimeToHours(defaultTime);
+    const dailyHours = parseDurationToHours(defaultTime) || 8;
 
     // 4a. Group by issueKey+date → merge all transitions into one entry
     const merged = new Map<string, { issueKey: string; date: string; comment: string; transitions: string[] }>();
@@ -298,11 +299,4 @@ export const jiraFetcher = {
   }
 };
 
-/** Parse Jira time notation to decimal hours */
-function parseTimeToHours(time: string): number {
-  const hMatch = time.match(/(\d+)h/);
-  const mMatch = time.match(/(\d+)m/);
-  const hours = hMatch ? parseInt(hMatch[1]) : 0;
-  const minutes = mMatch ? parseInt(mMatch[1]) : 0;
-  return hours + minutes / 60 || 8;
-}
+
