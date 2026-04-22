@@ -64,9 +64,9 @@ export const useSync = (
       // Sync the entry
       await syncSingleEntry(entry);
 
-      // 5-second delay between requests as requested by user
+      // 1-second delay between requests to protect Jira API rate limits
       if (i < readyEntries.length - 1) {
-        await sleep(5000);
+        await sleep(1000);
       }
     }
 

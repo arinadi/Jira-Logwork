@@ -244,7 +244,7 @@ function AppContent() {
                     <Zap className="w-3 h-3 text-white" />
                   </div>
                   <p className="text-[11px] text-blue-50 font-medium leading-relaxed italic">
-                    Sequencing logs with 5s cooldown to protect Jira API rate limits.
+                    Sequencing logs with 1s cooldown to protect Jira API rate limits.
                   </p>
                 </div>
               </div>

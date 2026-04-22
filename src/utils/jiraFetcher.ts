@@ -23,7 +23,7 @@ const delay = (ms: number, signal?: AbortSignal) =>
   });
 
 /** Rate limit: wait this many ms between API calls */
-const THROTTLE_MS = 3000;
+const THROTTLE_MS = 1000;
 
 /** Convert decimal hours to Jira time notation (e.g., 2.6667 -> "2h 40m") */
 function hoursToJiraTime(hours: number): string {
