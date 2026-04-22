@@ -105,13 +105,14 @@ export const jiraFetcher = {
     }
 
     const allIssueKeys = Array.from(issueMap.keys());
-    const totalSteps = allIssueKeys.length * 2; // changelog + comments per issue
-    onProgress?.(0, totalSteps, `Found ${allIssueKeys.length} issues. Scanning changelogs & comments...`);
+    const totalSteps = allIssueKeys.length * 3; // changelog + comments + worklogs per issue
+    onProgress?.(0, totalSteps, `Found ${allIssueKeys.length} issues. Scanning history & existing worklogs...`);
 
-    // Collect raw events
+    // Collect raw events and track existing worklogs
     const rawEvents: RawEvent[] = [];
+    const existingWorklogs = new Set<string>(); // Tracks "issueKey::yyyy-MM-dd"
     
-    // For each issue: fetch changelog, then fetch comments
+    // For each issue: fetch changelog, then comments, then worklogs
     for (let i = 0; i < allIssueKeys.length; i++) {
       if (signal?.aborted) break;
       const key = allIssueKeys[i];
@@ -119,7 +120,7 @@ export const jiraFetcher = {
       
       try {
         // --- Step 2: Fetch changelog ---
-        onProgress?.(i * 2 + 1, totalSteps, `[${i + 1}/${allIssueKeys.length}] Changelog: ${key}`);
+        onProgress?.(i * 3 + 1, totalSteps, `[${i + 1}/${allIssueKeys.length}] Changelog: ${key}`);
         
         const statusChangeDates: Array<{ date: string; statusChange: string }> = [];
         let changelogStartAt = 0;
@@ -158,7 +159,7 @@ export const jiraFetcher = {
         }
 
         // --- Step 3: Fetch latest comment for this issue ---
-        onProgress?.(i * 2 + 2, totalSteps, `[${i + 1}/${allIssueKeys.length}] Comments: ${key}`);
+        onProgress?.(i * 3 + 2, totalSteps, `[${i + 1}/${allIssueKeys.length}] Comments: ${key}`);
         await delay(THROTTLE_MS, signal);
 
         // Build a map: date -> latest comment text (by author, on that date)
@@ -200,6 +201,20 @@ export const jiraFetcher = {
             comment: dateComment,
             statusChange: sc.statusChange,
           });
+        }
+
+        // --- Step 3b: Fetch existing worklogs for this issue ---
+        onProgress?.(i * 3 + 3, totalSteps, `[${i + 1}/${allIssueKeys.length}] Checking existing worklogs: ${key}`);
+        const worklogsData = await jiraService.getIssueWorklogs(config, key, signal);
+        const worklogs = worklogsData.worklogs || [];
+        
+        for (const w of worklogs) {
+          const wAuthor = (w.author || {}).displayName || '';
+          if (wAuthor !== authorName) continue;
+          
+          const wDate = parseISO(w.started);
+          const wDateKey = format(wDate, 'yyyy-MM-dd');
+          existingWorklogs.add(`${key}::${wDateKey}`);
         }
       } catch (err) {
         if ((err as Error).name !== 'AbortError') {
@@ -260,13 +275,16 @@ export const jiraFetcher = {
         commentParts.push(`Status: ${transitionText}`);
         const finalComment = commentParts.join(' | ');
 
+        const existingKey = `${ticket.issueKey}::${date}`;
+        const hasExistingWorklog = existingWorklogs.has(existingKey);
+
         entries.push({
           id: crypto.randomUUID(),
           issueKey: ticket.issueKey,
           date,
           timeSpent,
           comment: finalComment,
-          status: 'ready',
+          status: hasExistingWorklog ? 'synced' : 'ready',
           originalRowIndex: entries.length,
         });
       }

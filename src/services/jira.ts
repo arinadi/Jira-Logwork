@@ -58,6 +58,15 @@ export const jiraService = {
   },
 
   /**
+   * Fetches all worklogs for a specific issue
+   */
+  async getIssueWorklogs(config: AuthConfig, issueKey: string, signal?: AbortSignal) {
+    const response = await this.apiFetch(config, `/rest/api/3/issue/${issueKey}/worklog`, { signal });
+    if (!response.ok) throw new Error(`Failed to fetch worklogs for ${issueKey}`);
+    return response.json();
+  },
+
+  /**
    * Adds a worklog to a specific issue
    */
   async addWorklog(config: AuthConfig, issueKey: string, data: { date: string, timeSpent: string, comment: string }) {
