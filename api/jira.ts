@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const { path } = req.query;
+  const { path, ...restQuery } = req.query;
   const jiraPath = Array.isArray(path) ? path.join('/') : path;
   const targetDomain = req.headers['x-jira-domain'] as string;
 
@@ -10,7 +10,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // Path will be everything after /api/jira/ (e.g. rest/api/3/myself)
-  const url = `https://${targetDomain}/${jiraPath || ''}`;
+  let url = `https://${targetDomain}/${jiraPath || ''}`;
+
+  // Forward any additional query parameters (like jql, startAt, maxResults)
+  const searchParams = new URLSearchParams();
+  for (const [key, value] of Object.entries(restQuery)) {
+    if (Array.isArray(value)) {
+      value.forEach(v => searchParams.append(key, String(v)));
+    } else if (value !== undefined) {
+      searchParams.append(key, String(value));
+    }
+  }
+  
+  const queryString = searchParams.toString();
+  if (queryString) {
+    url += `?${queryString}`;
+  }
 
   // Prepare headers for forwarding
   const headers = new Headers();
