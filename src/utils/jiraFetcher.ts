@@ -207,8 +207,8 @@ export const jiraFetcher = {
             globalLatestComment = text;
           }
 
-          // For each date, keep the latest comment (first encountered = newest due to -created order)
-          if (cAuthor === authorName && !commentsByDate.has(cDateKey)) {
+          // For each date within range, keep the latest comment
+          if (cAuthor === authorName && isWithinInterval(cDate, { start, end }) && !commentsByDate.has(cDateKey)) {
             commentsByDate.set(cDateKey, text);
           }
         }
