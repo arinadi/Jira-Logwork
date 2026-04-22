@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Search, Calendar, User, Loader2, Download, Table as TableIcon, Zap } from 'lucide-react';
+import { X, Search, Calendar, User, Loader2, Download, Table as TableIcon, Zap, RotateCcw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { jiraService } from '../services/jira';
 import { jiraFetcher, type FetchParams } from '../utils/jiraFetcher';
@@ -279,6 +279,17 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ isOpen, onClos
                     <TableIcon className="w-6 h-6 group-hover:scale-110 transition-transform" />
                   </div>
                   <span className="font-semibold group-hover:text-white transition-colors">Import to Workspace</span>
+                </button>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  onClick={() => setResults(null)}
+                  className="flex items-center gap-2 px-6 py-2.5 rounded-xl font-medium transition-colors hover:bg-black/5 dark:hover:bg-white/5 active:scale-95"
+                  style={{ color: 'var(--text-subtle)' }}
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  Change Parameters
                 </button>
               </div>
             </div>
