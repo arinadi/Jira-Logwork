@@ -9,9 +9,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Missing x-jira-domain header' });
   }
 
-  // Determine the full URL
-  // path will be everything after /api/jira/
-  const url = `https://${targetDomain}/rest/api/3/${jiraPath || ''}`;
+  // Path will be everything after /api/jira/ (e.g. rest/api/3/myself)
+  const url = `https://${targetDomain}/${jiraPath || ''}`;
 
   // Prepare headers for forwarding
   const headers = new Headers();
@@ -22,16 +21,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   headers.set('Content-Type', 'application/json');
 
   try {
-    const response = await fetch(url, {
+    const fetchOptions: RequestInit = {
       method: req.method,
       headers: headers,
-      body: req.method !== 'GET' ? JSON.stringify(req.body) : undefined,
-    });
+    };
 
-    const data = await response.json();
-    return res.status(response.status).json(data);
+    if (req.method !== 'GET' && req.method !== 'HEAD' && req.body) {
+      fetchOptions.body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    }
+
+    const response = await fetch(url, fetchOptions);
+    const contentType = response.headers.get('content-type');
+    
+    if (contentType && contentType.includes('application/json')) {
+      const data = await response.json();
+      return res.status(response.status).json(data);
+    } else {
+      const text = await response.text();
+      return res.status(response.status).send(text);
+    }
   } catch (error) {
     console.error('Proxy Error:', error);
-    return res.status(500).json({ error: 'Failed to proxy request to Jira' });
+    return res.status(500).json({ 
+      error: 'Failed to proxy request to Jira',
+      details: error instanceof Error ? error.message : String(error),
+      url: url
+    });
   }
 }
