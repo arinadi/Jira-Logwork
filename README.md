@@ -4,7 +4,7 @@
 Say goodbye to the clunky native Jira worklog interface. Our **Worklog IDE** provides a premium, spreadsheet-like experience that turns hours of data entry into a few clicks. Whether you're importing a CSV from a local tracker or auto-generating logs from your issue history, this is the tool you've been waiting for.
 
 - 📦 **Jira Bulk Worklog Upload**: Import thousands of rows from any CSV file with our intelligent fuzzy-mapping engine.
-- 🕵️ **Jira History Scrapper**: Automatically generate worklogs by scanning issue status changes. No more manual memory recalls!
+- 🕵️ **Jira History Scrapper**: Automatically generate worklogs by scanning issue status changes. Includes built-in smart duplicate prevention by cross-referencing existing Jira worklogs to avoid double-logging.
 - 🔒 **Zero-Trust Security**: Your Jira API Tokens and credentials stay 100% in your browser's local storage. We never see your data.
 - ⛽ **High-Performance Grid**: Edit your worklogs in a lightning-fast spreadsheet interface with real-time Jira validation.
 - 🔋 **Daily Capacity Tracker**: Visual indicators ensure you reach your 8.0-hour daily target with precision.
@@ -31,7 +31,7 @@ This application is built as a high-performance, stateless static web app using:
 ### ⚙️ Core Logic Modules
 - **`jiraService`**: Handles paginated REST API v3 calls, including ADF (Atlassian Document Format) payload transformation.
 - **`useSync`**: Orchestrates sequential batch uploads with a mandatory **5-second cooldown** between requests to prevent Jira API rate limiting (429 errors).
-- **`jiraFetcher`**: A recursive history scrapper that paginates through JQL search results and issue changelogs to detect status events.
+- **`jiraFetcher`**: A recursive history scrapper that paginates through JQL search results and issue changelogs to detect status events. It actively fetches existing worklogs concurrently to perform smart duplicate detection.
 - **`validationEngine`**: Performs real-time regex and date-math checks to ensure 100% Jira compatibility before any API call.
 
 ### 🚀 Getting Started

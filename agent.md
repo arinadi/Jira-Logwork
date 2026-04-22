@@ -1,5 +1,5 @@
 ## Project Status
-Modules 0-4 (Setup, Auth, CSV, Grid, Sync) are completed and verified! The app is now fully functional.
+Modules 0-4, 6 (Setup, Auth, CSV, Grid, Sync, History Scrapper) are completed and verified! The app is now fully functional.
 
 ## Architecture
 - **Sync Engine**: `src/hooks/useSync.ts` handles sequential worklog creation with a mandatory 5-second delay per request to avoid rate limits.
@@ -11,5 +11,4 @@ Modules 0-4 (Setup, Auth, CSV, Grid, Sync) are completed and verified! The app i
 - **Row Locking**: Synced rows are disabled for editing/deletion to maintain data integrity.
 
 ## Next Steps
-- **Module 6: Jira Event Fetcher**: Implement the auto-log generator from status changes (The Python logic port).
 - **Module 5: Polish & Reports**: Final UI refinements and success summaries.
