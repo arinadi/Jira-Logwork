@@ -1,5 +1,5 @@
 import React from 'react';
-import { Trash2, Play, CheckCircle2, AlertCircle, XCircle, Loader2 } from 'lucide-react';
+import { Trash2, Play, CheckCircle2, AlertCircle, XCircle, Loader2, Copy } from 'lucide-react';
 import type { WorklogEntry } from '../types/worklog';
 import { EditableCell } from './DataGrid/EditableCell';
 import { validateEntry } from '../utils/validation';
@@ -9,6 +9,7 @@ interface WorklogTableProps {
   entries: WorklogEntry[];
   onUpdate: (id: string, updates: Partial<WorklogEntry>) => void;
   onRemove: (id: string) => void;
+  onClone: (id: string) => void;
   onClearAll: () => void;
   onSyncRow: (entry: WorklogEntry) => void;
 }
@@ -27,6 +28,7 @@ export const WorklogTable: React.FC<WorklogTableProps> = ({
   entries, 
   onUpdate, 
   onRemove, 
+  onClone,
   onClearAll,
   onSyncRow
 }) => {
@@ -44,7 +46,7 @@ export const WorklogTable: React.FC<WorklogTableProps> = ({
             <th className="w-32 px-6 py-4 text-[10px] font-bold uppercase tracking-[0.15em]" style={thStyle}>Time</th>
             <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-[0.15em]" style={thStyle}>Comment</th>
             <th className="w-32 px-6 py-4 text-[10px] font-bold uppercase tracking-[0.15em]" style={thStyle}>Status</th>
-            <th className="w-24 px-6 py-4">
+            <th className="w-32 px-6 py-4">
               <button 
                 onClick={onClearAll}
                 className="flex items-center gap-1 ml-auto text-red-500/60 hover:text-red-500 transition-all uppercase text-[10px] font-black tracking-widest active:scale-90"
@@ -109,11 +111,20 @@ export const WorklogTable: React.FC<WorklogTableProps> = ({
                   <StatusBadge status={entry.status} error={entry.errorMessage || Object.values(errors)[0]} />
                 </td>
                 <td className="px-6 py-4 text-right">
-                  <div className={`flex items-center justify-end gap-2 transition-all duration-300 ${isSyncing ? 'opacity-100' : 'opacity-0 translate-x-2 group-hover:opacity-100 group-hover:translate-x-0'}`}>
+                  <div className={`flex items-center justify-end gap-1 transition-all duration-300 ${isSyncing ? 'opacity-100' : 'opacity-0 translate-x-2 group-hover:opacity-100 group-hover:translate-x-0'}`}>
+                    <button 
+                      onClick={() => onClone(entry.id)}
+                      disabled={isSyncing}
+                      className="p-2 rounded-xl transition-all disabled:opacity-30 active:scale-90 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      style={{ color: 'var(--text-subtle)' }}
+                      title="Clone Row (Date+1)"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
                     <button 
                       onClick={() => onRemove(entry.id)}
                       disabled={isSyncing || isSynced}
-                      className="p-2 rounded-xl transition-all disabled:opacity-30 active:scale-90 hover:opacity-70"
+                      className="p-2 rounded-xl transition-all disabled:opacity-30 active:scale-90 hover:bg-red-50 dark:hover:bg-red-950/30"
                       style={{ color: 'var(--text-subtle)' }}
                       title="Remove Row"
                     >

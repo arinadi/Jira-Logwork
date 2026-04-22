@@ -24,6 +24,7 @@ function AppContent() {
     applyMapping, 
     updateEntry,
     removeEntry, 
+    cloneEntry,
     clearEntries,
     addEntries,
     cancelMapping 
@@ -162,6 +163,7 @@ function AppContent() {
                   entries={entries} 
                   onUpdate={updateEntry}
                   onRemove={removeEntry} 
+                  onClone={cloneEntry}
                   onClearAll={clearEntries}
                   onSyncRow={syncSingleEntry}
                 />
