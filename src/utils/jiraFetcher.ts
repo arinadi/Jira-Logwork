@@ -36,8 +36,26 @@ function hoursToJiraTime(hours: number): string {
   return `${h}h ${m}m`;
 }
 
-/** Extract plain text from Atlassian Document Format (ADF) recursively */
+/** Extract plain text from Atlassian Document Format (ADF) — first 2 lines only (Optimized for comments) */
 function adfToPlainText(adf: unknown): string {
+  if (!adf) return '';
+  if (typeof adf === 'string') return adf;
+  if (typeof adf !== 'object') return '';
+  const doc = adf as { content?: Array<{ content?: Array<{ text?: string }> }> };
+  const lines: string[] = [];
+  for (const block of (doc.content || []).slice(0, 2)) {
+    const texts: string[] = [];
+    for (const inline of block.content || []) {
+      if (inline.text) texts.push(inline.text);
+    }
+    if (texts.length > 0) lines.push(texts.join(' '));
+  }
+  const result = lines.join('. ').trim();
+  return result.length > 160 ? result.substring(0, 157) + '...' : result;
+}
+
+/** Deep recursive extraction specifically for Worklog comments (handles lists/nested blocks) */
+function adfToWorklogText(adf: unknown): string {
   if (!adf) return '';
   if (typeof adf === 'string') return adf;
   if (typeof adf !== 'object') return '';
@@ -50,13 +68,12 @@ function adfToPlainText(adf: unknown): string {
     return '';
   };
 
-  // Process top-level blocks (e.g., paragraphs, lists) and join them
   const doc = adf as { content?: any[] };
-  const blocks = (doc.content || []).slice(0, 3); // Capture up to 3 blocks for conciseness
+  const blocks = (doc.content || []).slice(0, 5); // Allow more blocks for worklogs
   const lines = blocks.map(block => extract(block).trim()).filter(Boolean);
   
   const result = lines.join('. ').replace(/\s+/g, ' ').trim();
-  return result.length > 200 ? result.substring(0, 197) + '...' : result;
+  return result.length > 300 ? result.substring(0, 297) + '...' : result;
 }
 
 /** Raw event collected before smart distribution */
@@ -211,7 +228,7 @@ export const jiraFetcher = {
           if (!isWithinInterval(wDate, { start, end })) continue;
 
           const wDateKey = format(wDate, 'yyyy-MM-dd');
-          const wComment = w.comment ? adfToPlainText(w.comment) : '';
+          const wComment = w.comment ? adfToWorklogText(w.comment) : '';
           
           existingWorklogs.set(`${key}::${wDateKey}`, wComment);
           worklogDates.add(wDateKey);
