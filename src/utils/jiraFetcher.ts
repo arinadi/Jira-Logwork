@@ -36,22 +36,27 @@ function hoursToJiraTime(hours: number): string {
   return `${h}h ${m}m`;
 }
 
-/** Extract plain text from Atlassian Document Format (ADF) — first 2 lines only */
+/** Extract plain text from Atlassian Document Format (ADF) recursively */
 function adfToPlainText(adf: unknown): string {
   if (!adf) return '';
   if (typeof adf === 'string') return adf;
   if (typeof adf !== 'object') return '';
-  const doc = adf as { content?: Array<{ content?: Array<{ text?: string }> }> };
-  const lines: string[] = [];
-  for (const block of (doc.content || []).slice(0, 2)) {
-    const texts: string[] = [];
-    for (const inline of block.content || []) {
-      if (inline.text) texts.push(inline.text);
+
+  const extract = (node: any): string => {
+    if (node.type === 'text') return node.text || '';
+    if (node.content && Array.isArray(node.content)) {
+      return node.content.map(extract).join(' ');
     }
-    if (texts.length > 0) lines.push(texts.join(' '));
-  }
-  const result = lines.join('. ').trim();
-  return result.length > 160 ? result.substring(0, 157) + '...' : result;
+    return '';
+  };
+
+  // Process top-level blocks (e.g., paragraphs, lists) and join them
+  const doc = adf as { content?: any[] };
+  const blocks = (doc.content || []).slice(0, 3); // Capture up to 3 blocks for conciseness
+  const lines = blocks.map(block => extract(block).trim()).filter(Boolean);
+  
+  const result = lines.join('. ').replace(/\s+/g, ' ').trim();
+  return result.length > 200 ? result.substring(0, 197) + '...' : result;
 }
 
 /** Raw event collected before smart distribution */
