@@ -1,20 +1,48 @@
-🚀 **Zero-Trust Jira Worklog IDE** — The ultimate productivity companion for high-performance teams using Atlassian Jira. Stop wasting hours on manual time tracking and start syncing in seconds.
+🚀 **Zero-Trust Jira Worklog IDE** — Stop doing double work. Focus on your tickets — comment, update status, move things forward — and let the IDE turn that activity into worklogs automatically.
 
-**Experience the Future of Jira Logging.**
-Say goodbye to the clunky native Jira worklog interface. Our **Worklog IDE** provides a premium, spreadsheet-like experience that turns hours of data entry into a few clicks. Whether you're importing a CSV from a local tracker or auto-generating logs from your issue history, this is the tool you've been waiting for.
+**The Problem:** You already work hard on your Jira tickets. But at the end of the day, you still have to manually log hours — re-typing what you already did. That's double work. That's wasted time.
 
-- 📦 **Jira Bulk Worklog Upload**: Import thousands of rows from any CSV file with our intelligent fuzzy-mapping engine.
-- 🕵️ **Jira History Scrapper**: Automatically generate worklogs by scanning issue status changes. Includes built-in smart duplicate prevention by cross-referencing existing Jira worklogs to avoid double-logging.
-- 🔒 **Zero-Trust Security**: Your Jira API Tokens and credentials stay 100% in your browser's local storage. We never see your data.
-- ⛽ **High-Performance Grid**: Edit your worklogs in a lightning-fast spreadsheet interface with real-time Jira validation.
-- 🔋 **Daily Capacity Tracker**: Visual indicators ensure you reach your 8.0-hour daily target with precision.
-- 🌙 **Elite Aesthetics**: Atlassian-inspired design with full Dark Mode support for late-night coding sessions.
+**The Solution:** This tool scans your *actual Jira activity* — status changes, comments, worklogs — and generates time entries for you. The more active you are on your tickets, the better your worklogs become. **Zero extra effort.**
 
-**How to Scale Your Productivity:**
-1. **Connect**: Enter your Jira domain and Personal Access Token (PAT) securely.
-2. **Import**: Drag & Drop your CSV or use the **"Fetch From Jira"** scrapper to auto-populate.
-3. **Refine**: Edit your logs directly in the grid. Watch the **Capacity Tracker** update in real-time.
-4. **Sync**: Click "Sync All Valid" and watch the **Batch Engine** handle the API heavy lifting for you.
+### ✨ Key Features
+
+- 🧠 **Smart Fetch Engine** — Scans your Jira issue history (status changes, comments, existing worklogs) and auto-generates time entries. Detects activity across all three data sources per issue.
+- 🔁 **Intelligent Duplicate Prevention** — Cross-references existing Jira worklogs before generating new ones. Already-logged entries are marked as "synced" and locked from re-upload.
+- ⏱️ **Auto Time Distribution** — Distributes your daily target (default 8h) equally across all tickets with activity on the same day. 3 tickets on Monday? Each gets 2h 40m.
+- 💬 **Comment-First Logging** — Uses your latest Jira comment as the worklog description. Falls back to status transitions, then issue summary. Your own words become your log.
+- 📅 **Calendar-Aware Performance Tracker** — Shows all dates in your work range with:
+  - 🏛 **Public holiday detection** — Indonesia uses [libur.deno.dev](https://libur.deno.dev) (24 entries including Idul Fitri, Nyepi, Imlek, Idul Adha). Other countries use [Nager.at](https://date.nager.at) API.
+  - 📆 **Weekend highlighting** — Saturday/Sunday are dimmed with badges.
+  - 🟢 **Today indicator** — Current date highlighted with animated chip.
+  - 💜 **Overtime detection** — Work logged on holidays/weekends shown with violet bar.
+  - ⚠️ **Gap detection** — Hover over empty working days to see "No worklogs" hints.
+- 📦 **CSV Bulk Upload** — Import from any spreadsheet with intelligent fuzzy column mapping.
+- 🔒 **Zero-Trust Security** — Credentials stored 100% in browser localStorage. Nothing leaves your machine.
+- 🌗 **Dark Mode** — Full Atlassian-inspired design with seamless light/dark transitions.
+
+### 🔄 How It Works
+
+1. **Connect** — Enter your Jira domain + Personal Access Token (PAT). Stored locally.
+2. **Fetch** — Write a JQL query, pick a date range. The Smart Fetch engine scans changelog, comments, and existing worklogs for each issue.
+3. **Review** — Edit generated entries in the spreadsheet grid. Watch the Performance tracker fill in real-time.
+4. **Sync** — Hit "Batch Sync". The engine uploads sequentially with rate-limit protection.
+
+### 🧠 Smart Fetch: How Activity Becomes Worklogs
+
+```
+For each issue matching your JQL:
+  ├── Fetch changelog     → detect status transitions by you in date range
+  ├── Fetch comments      → find your latest comment per date (fallback: global latest)
+  ├── Fetch worklogs      → detect existing entries to prevent duplicates
+  └── Merge all activity dates → one entry per issue per day
+
+Then:
+  ├── Group entries by date
+  ├── Distribute daily hours equally (8h ÷ N tickets)
+  └── Mark existing worklogs as "synced" (locked, won't re-upload)
+```
+
+**The motivation is simple:** Be active on your Jira tickets — comment on blockers, move status, discuss with your team — and the IDE will handle the logwork for you. No more double work.
 
 ---
 
@@ -27,11 +55,13 @@ This application is built as a high-performance, stateless static web app using:
 - **Data Engine**: PapaParse (Streaming CSV processing)
 - **State Management**: React Context API for Zero-Trust credentials
 - **Icons**: Lucide React for consistent visual language
+- **Holiday APIs**: [libur.deno.dev](https://libur.deno.dev) (Indonesia) + [Nager.at](https://date.nager.at) (100+ countries) with localStorage cache (24h TTL)
 
 ### ⚙️ Core Logic Modules
 - **`jiraService`**: Handles paginated REST API v3 calls, including ADF (Atlassian Document Format) payload transformation.
 - **`useSync`**: Orchestrates sequential batch uploads with a mandatory **5-second cooldown** between requests to prevent Jira API rate limiting (429 errors).
-- **`jiraFetcher`**: A recursive history scrapper that paginates through JQL search results and issue changelogs to detect status events. It actively fetches existing worklogs concurrently to perform smart duplicate detection.
+- **`jiraFetcher`**: The Smart Fetch engine. Paginates through JQL results, changelogs, comments, and existing worklogs per issue. Performs unified activity detection across all three data sources, then distributes time across tickets proportionally.
+- **`holidayService`**: Dual-source holiday provider. Routes Indonesia (ID) to libur.deno.dev for complete data (Idul Fitri, Nyepi, Imlek, etc.). All other countries use Nager.at API. Both cached in localStorage for 24h.
 - **`validationEngine`**: Performs real-time regex and date-math checks to ensure 100% Jira compatibility before any API call.
 
 ### 🚀 Getting Started

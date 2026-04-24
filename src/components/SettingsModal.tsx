@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { X, Loader2, Lock } from 'lucide-react';
+import { X, Loader2, Lock, Globe } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { holidayService, getSavedCountry, saveCountry } from '../services/holidays';
 import type { AuthConfig } from '../types/auth';
+import type { AvailableCountry } from '../types/holiday';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -17,6 +19,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   });
   const [localLoading, setLocalLoading] = useState(false);
 
+  // Country state
+  const [countries, setCountries] = useState<AvailableCountry[]>([]);
+  const [selectedCountry, setSelectedCountry] = useState(getSavedCountry());
+  const [countriesLoading, setCountriesLoading] = useState(false);
+
   useEffect(() => {
     if (config) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -24,11 +31,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     }
   }, [config, isOpen]);
 
+  // Fetch available countries when modal opens
+  useEffect(() => {
+    if (!isOpen) return;
+    setCountriesLoading(true);
+    holidayService.getAvailableCountries()
+      .then(data => setCountries(data))
+      .catch(err => console.error('Failed to load countries:', err))
+      .finally(() => setCountriesLoading(false));
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setLocalLoading(true);
+
+    // Save country preference
+    saveCountry(selectedCountry);
+
     const success = await saveConfig(formData);
     setLocalLoading(false);
     if (success) {
@@ -136,6 +157,45 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               />
               <p className="px-1 text-[10px] text-[var(--text-subtle)] opacity-60 font-medium">
                 Settings &gt; Personal Access Tokens &gt; Create
+              </p>
+            </div>
+
+            {/* Country Selector */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black text-[var(--text-subtle)] uppercase tracking-widest pl-1 flex items-center gap-1.5">
+                <Globe className="w-3 h-3" />
+                Holiday Country
+              </label>
+              <div className="relative">
+                <select
+                  value={selectedCountry}
+                  onChange={(e) => setSelectedCountry(e.target.value)}
+                  className="w-full px-4 py-3 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-xl text-sm font-bold text-[var(--text-main)] focus:ring-2 focus:ring-atlassian-blue outline-none transition-all appearance-none cursor-pointer pr-10"
+                  disabled={countriesLoading}
+                >
+                  {countriesLoading ? (
+                    <option>Loading countries...</option>
+                  ) : (
+                    countries.map(c => (
+                      <option key={c.countryCode} value={c.countryCode}>
+                        {c.name} ({c.countryCode})
+                      </option>
+                    ))
+                  )}
+                </select>
+                {/* Custom dropdown chevron */}
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--text-subtle)]">
+                  {countriesLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                  )}
+                </div>
+              </div>
+              <p className="px-1 text-[10px] text-[var(--text-subtle)] opacity-60 font-medium">
+                Public holidays for the Performance tracker sidebar
               </p>
             </div>
           </div>
