@@ -11,9 +11,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'pwa-192x192.png', 'pwa-512x512.png'],
       manifest: {
-        name: 'Zero-Trust Jira Worklog IDE',
-        short_name: 'JiraWorklog',
-        description: 'Elite Jira Worklog Bulk Uploader & History Scrapper',
+        name: 'Jira Logwork',
+        short_name: 'JiraLogwork',
+        description: 'Smart Jira worklog generator — scan activity, auto-distribute hours, sync in bulk',
         theme_color: '#0052cc',
         background_color: '#ffffff',
         display: 'standalone',

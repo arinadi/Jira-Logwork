@@ -12,7 +12,7 @@ export const toADF = (text: string) => {
         content: [
           {
             type: 'text',
-            text: text || 'Uploaded via Zero-Trust Worklog IDE'
+            text: text || 'Uploaded via Jira Logwork'
           }
         ]
       }

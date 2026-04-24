@@ -1,4 +1,4 @@
-🚀 **Zero-Trust Jira Worklog IDE** — Stop doing double work. Focus on your tickets — comment, update status, move things forward — and let the IDE turn that activity into worklogs automatically.
+🚀 **Jira Logwork** — Stop doing double work. Focus on your tickets — comment, update status, move things forward — and let the tool turn that activity into worklogs automatically. [**jira-logwork.vercel.app**](https://jira-logwork.vercel.app)
 
 **The Problem:** You already work hard on your Jira tickets. But at the end of the day, you still have to manually log hours — re-typing what you already did. That's double work. That's wasted time.
 

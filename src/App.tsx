@@ -68,8 +68,8 @@ function AppContent() {
             <Layout className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 className="text-xl font-semibold text-[var(--text-main)] leading-tight tracking-tight">Zero-Trust Worklog IDE</h1>
-            <p className="text-pro-label">Engineered for Jira</p>
+            <h1 className="text-xl font-semibold text-[var(--text-main)] leading-tight tracking-tight">Jira Logwork</h1>
+            <p className="text-pro-label">jira-logwork.vercel.app</p>
           </div>
         </div>
         
@@ -190,23 +190,23 @@ function AppContent() {
             </div>
           ) : (
             <div className="flex flex-col gap-10">
-              <Uploader onFileSelect={importFile} />
-              
-              <div className="flex items-center gap-6 py-4">
-                <div className="h-px flex-1 bg-[var(--border-color)]"></div>
-                <p className="text-pro-label">Or automate with history</p>
-                <div className="h-px flex-1 bg-[var(--border-color)]"></div>
-              </div>
-
                <div className="card-premium p-12 text-center group cursor-pointer hover:border-atlassian-blue/30 transition-all duration-500" onClick={() => setShowFetchDialog(true)}>
                 <div className="w-24 h-24 bg-atlassian-blue/5 text-atlassian-blue rounded-[2rem] flex items-center justify-center mx-auto mb-8 group-hover:scale-110 group-hover:bg-atlassian-blue group-hover:text-white transition-all duration-700 shadow-xl shadow-atlassian-blue/5 border border-atlassian-blue/10">
                   <Zap className="w-10 h-10" />
                 </div>
                 <h3 className="text-3xl font-semibold text-[var(--text-main)] mb-3 tracking-tight">Fetch From Jira History</h3>
                 <p className="text-[var(--text-subtle)] max-w-sm mx-auto font-medium text-base leading-relaxed">
-                  Automatically generate worklogs by scanning your issue status changes from a date range.
+                  Automatically generate worklogs by scanning your issue activity from a date range.
                 </p>
               </div>
+
+              <div className="flex items-center gap-6 py-4">
+                <div className="h-px flex-1 bg-[var(--border-color)]"></div>
+                <p className="text-pro-label">Or import manually</p>
+                <div className="h-px flex-1 bg-[var(--border-color)]"></div>
+              </div>
+
+              <Uploader onFileSelect={importFile} />
             </div>
           )}
         </div>
