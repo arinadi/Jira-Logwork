@@ -34,6 +34,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   // Fetch available countries when modal opens
   useEffect(() => {
     if (!isOpen) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCountriesLoading(true);
     holidayService.getAvailableCountries()
       .then(data => setCountries(data))

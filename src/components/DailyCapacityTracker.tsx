@@ -43,6 +43,7 @@ export const DailyCapacityTracker: React.FC<DailyCapacityTrackerProps> = ({ entr
     const country = getSavedCountry();
     let cancelled = false;
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     Promise.all(years.map(y => holidayService.getPublicHolidays(y, country)))
       .then(results => {

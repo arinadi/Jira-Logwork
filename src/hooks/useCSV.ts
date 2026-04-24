@@ -65,7 +65,7 @@ export const useCSV = () => {
         const date = parseISO(entry.date);
         const nextDate = addDays(date, 1);
         nextDateStr = format(nextDate, 'yyyy-MM-dd');
-      } catch (e) {
+      } catch {
         console.warn('Failed to parse date for cloning:', entry.date);
       }
       
