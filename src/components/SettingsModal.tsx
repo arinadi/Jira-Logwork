@@ -128,9 +128,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 type="text"
                 required
                 className="w-full px-4 py-3 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-xl text-sm font-bold text-[var(--text-main)] focus:ring-2 focus:ring-atlassian-blue outline-none transition-all placeholder:opacity-30"
-                placeholder="company.atlassian.net"
+                placeholder="gameloft.atlassian.net"
                 value={formData.domain}
-                onChange={(e) => setFormData({ ...formData, domain: e.target.value })}
+                onChange={(e) => {
+                  let value = e.target.value;
+                  // Remove http:// or https:// from the beginning
+                  value = value.replace(/^https?:\/\//, '');
+                  // Remove trailing slashes
+                  value = value.replace(/\/+$/, '');
+                  setFormData({ ...formData, domain: value });
+                }}
               />
             </div>
 
