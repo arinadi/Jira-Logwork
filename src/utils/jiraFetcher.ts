@@ -1,7 +1,7 @@
 import type { AuthConfig } from '../types/auth';
 import type { WorklogEntry } from '../types/worklog';
 import { jiraService } from '../services/jira';
-import { format, parseISO, isWithinInterval } from 'date-fns';
+import { format, parseISO, addDays, isWithinInterval } from 'date-fns';
 import { parseDurationToHours } from './validation';
 
 export interface FetchParams {
@@ -112,7 +112,8 @@ export const jiraFetcher = {
   ): Promise<WorklogEntry[]> {
     const { jql, startDate, endDate, authorName, defaultTime = '8h' } = params;
     const start = parseISO(startDate);
-    const end = parseISO(endDate);
+    // End date must include the full day — shift to next midnight so isWithinInterval is inclusive
+    const end = addDays(parseISO(endDate), 1);
     
     // Step 1 — Fetch all issue keys + summaries
     onProgress?.(0, 1, 'Searching for matching issues...');
