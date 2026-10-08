@@ -3,6 +3,9 @@
   "name": "Jira Logwork",
   "version": "1.0.0",
   "description": "Smart Jira worklog generator — scan your activity, auto-distribute hours, sync in bulk",
+  "permissions": [
+    "scripting"
+  ],
   "host_permissions": [
     "https://*.atlassian.net/*",
     "https://hrms.gameloft.org/*"

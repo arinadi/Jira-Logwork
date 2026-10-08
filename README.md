@@ -67,7 +67,10 @@ Then, per day:
   └── No free time left → no new rows; the day is listed as "full" in the scan result
 
 Leave (HRMS, Settings "Read leave from HRMS", default on):
-  ├── POST https://hrms.gameloft.org/ID/leave-record/ajax-get-my-requests (all pages), your HRMS login
+  ├── POST https://hrms.gameloft.org/ID/leave-record/ajax-get-my-requests (all pages), your HRMS login.
+  │   The request runs INSIDE an hrms.gameloft.org tab (an open one, or a background tab that is opened
+  │   and closed again): from the extension's own page HRMS does not recognise the login.
+  │   An answer without totalRecords (or the login page) → warning "HRMS did not recognise your login"
   ├── Counts records with status Approved and no cancellation date, any leave type
   ├── Each weekday from from_date to to_date: first day from from_time, last day until to_time, others
   │   08:00–17:00; minus the 12:00–13:00 lunch when covered; at most 8h

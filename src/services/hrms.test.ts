@@ -1,6 +1,43 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { fetchHrmsLeave, HRMS_LEAVE_URL } from './hrms';
 
+const HRMS_PAGE = 'https://hrms.gameloft.org/ID/leave-record/my-requests';
+
+/**
+ * Stands in for the Chrome tabs + scripting APIs (they exist only inside the extension). executeScript runs the
+ * injected function right here, so its fetch goes to the stubbed global fetch like it would in the HRMS tab.
+ */
+function stubChrome({ hrmsTabOpen = true, backgroundTabUrl = HRMS_PAGE } = {}) {
+  const created: { url?: string; active?: boolean }[] = [];
+  const removed: number[] = [];
+  const injectedInto: number[] = [];
+  const listeners: Array<(tabId: number, info: { status?: string }) => void> = [];
+  vi.stubGlobal('chrome', {
+    tabs: {
+      query: vi.fn(async () => (hrmsTabOpen ? [{ id: 7, status: 'complete', url: HRMS_PAGE }] : [])),
+      create: vi.fn(async (props: { url?: string; active?: boolean }) => {
+        created.push(props);
+        setTimeout(() => listeners.forEach(l => l(9, { status: 'complete' })), 0);
+        return { id: 9, status: 'loading', url: '' };
+      }),
+      get: vi.fn(async (id: number) => ({ id, status: id === 9 && created.length > 0 ? 'complete' : 'loading', url: id === 9 ? backgroundTabUrl : HRMS_PAGE })),
+      remove: vi.fn(async (id: number) => { removed.push(id); }),
+      onUpdated: {
+        addListener: (l: (tabId: number, info: { status?: string }) => void) => listeners.push(l),
+        removeListener: (l: (tabId: number, info: { status?: string }) => void) => listeners.splice(listeners.indexOf(l), 1),
+      },
+    },
+    scripting: {
+      executeScript: vi.fn(async ({ target, func, args }: { target: { tabId: number }; func: (...a: unknown[]) => unknown; args: unknown[] }) => {
+        injectedInto.push(target.tabId);
+        return [{ result: await func(...args) }];
+      }),
+    },
+  });
+  return { created, removed, injectedInto };
+}
+
+beforeEach(() => { stubChrome(); });
 afterEach(() => { vi.unstubAllGlobals(); });
 
 const record = (n: number) => ({
@@ -35,4 +72,42 @@ describe('fetchHrmsLeave', () => {
 
     await expect(fetchHrmsLeave()).rejects.toThrow(/log in to HRMS/i);
   });
+
+  it('says HRMS did not recognise the login when the answer has no totalRecords', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ result: [], message: 'xxx' }), { status: 200 })));
+
+    await expect(fetchHrmsLeave()).rejects.toThrow(/did not recognise your login/i);
+  });
+
+  const oneRecordPage = () => vi.fn(async () => new Response(JSON.stringify({ totalRecords: 1, result: [record(1)] }), { status: 200 }));
+
+  it('runs the request inside an open HRMS tab and leaves that tab alone', async () => {
+    const chromeApi = stubChrome({ hrmsTabOpen: true });
+    vi.stubGlobal('fetch', oneRecordPage());
+
+    expect(await fetchHrmsLeave()).toHaveLength(1);
+    expect(chromeApi.injectedInto).toEqual([7]);
+    expect(chromeApi.created).toEqual([]);
+    expect(chromeApi.removed).toEqual([]);
+  });
+
+  it('opens a background HRMS tab when none is open, runs there, then closes it', async () => {
+    const chromeApi = stubChrome({ hrmsTabOpen: false });
+    vi.stubGlobal('fetch', oneRecordPage());
+
+    expect(await fetchHrmsLeave()).toHaveLength(1);
+    expect(chromeApi.created).toEqual([{ url: HRMS_PAGE, active: false }]);
+    expect(chromeApi.injectedInto).toEqual([9]);
+    expect(chromeApi.removed).toEqual([9]);
+  });
+
+  it('asks to log in when the background tab ends on the sign-in page, and still closes it', async () => {
+    const chromeApi = stubChrome({ hrmsTabOpen: false, backgroundTabUrl: 'https://login.microsoftonline.com/common/oauth2' });
+    vi.stubGlobal('fetch', oneRecordPage());
+
+    await expect(fetchHrmsLeave()).rejects.toThrow(/log in to HRMS/i);
+    expect(chromeApi.injectedInto).toEqual([]);
+    expect(chromeApi.removed).toEqual([9]);
+  });
 });
+
