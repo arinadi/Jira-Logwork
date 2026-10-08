@@ -69,7 +69,7 @@ function AppContent() {
           </div>
           <div>
             <h1 className="text-xl font-semibold text-[var(--text-main)] leading-tight tracking-tight">Jira Logwork</h1>
-            <p className="text-pro-label">jira-logwork.vercel.app</p>
+            <p className="text-pro-label">Chrome extension</p>
           </div>
         </div>
         

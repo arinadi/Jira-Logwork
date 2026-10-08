@@ -1,7 +1,6 @@
+/** Only the site: the extension authenticates with the browser's Jira login session. */
 export interface AuthConfig {
   domain: string;
-  email: string;
-  apiToken: string;
 }
 
 export type AuthStatus = 'idle' | 'connecting' | 'connected' | 'error';

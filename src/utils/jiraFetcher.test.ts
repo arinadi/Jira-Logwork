@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { jiraFetcher } from './jiraFetcher';
 import type { AuthConfig } from '../types/auth';
 
-const config: AuthConfig = { domain: 'acme.atlassian.net', email: 'me@acme.test', apiToken: 'token' };
+const config: AuthConfig = { domain: 'acme.atlassian.net' };
 const ME = { accountId: 'acc-me', displayName: 'Same Name' };
 const OTHER = { accountId: 'acc-other', displayName: 'Same Name' };
 
@@ -28,7 +28,7 @@ interface FakeJiraOptions {
 
 const adf = (text: string) => ({ type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] });
 
-/** Stands in for the Jira Cloud REST API v3 behind the /api/jira proxy. */
+/** Stands in for the Jira Cloud REST API v3 at https://acme.atlassian.net. */
 function fakeJira({ issues, searchByJql = () => issues.map(i => i.key), pageSize = 2 }: FakeJiraOptions) {
   const calls: string[] = [];
   const byKey = new Map(issues.map(i => [i.key, i]));
@@ -37,8 +37,9 @@ function fakeJira({ issues, searchByJql = () => issues.map(i => i.key), pageSize
 
   const handler = async (input: string | URL | Request) => {
     const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    const url = new URL(raw, 'http://localhost');
-    const path = url.pathname.replace(/^\/api\/jira/, '');
+    const url = new URL(raw);
+    if (url.origin !== 'https://acme.atlassian.net') throw new Error(`fakeJira: unexpected host ${url.origin}`);
+    const path = url.pathname;
     calls.push(path + url.search);
     if (calls.length > 500) throw new Error('fakeJira: too many calls (endless paging?)');
 

@@ -12,11 +12,7 @@ interface SettingsModalProps {
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const { config, user, saveConfig, disconnect } = useAuth();
-  const [formData, setFormData] = useState<AuthConfig>({
-    domain: '',
-    email: '',
-    apiToken: '',
-  });
+  const [formData, setFormData] = useState<AuthConfig>({ domain: '' });
   const [localLoading, setLocalLoading] = useState(false);
 
   // Country state
@@ -60,7 +56,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   const handleDisconnect = () => {
     disconnect();
-    setFormData({ domain: '', email: '', apiToken: '' });
+    setFormData({ domain: '' });
     onClose();
   };
 
@@ -115,7 +111,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             <div>
               <p className="text-xs font-black text-atlassian-blue uppercase tracking-tight">Zero-Trust Secured</p>
               <p className="text-xs text-[var(--text-subtle)] font-medium leading-relaxed opacity-80">
-                Credentials are stored locally in your browser and never sent to our servers.
+                Only your Jira domain is stored, in this browser. No password or token is saved or sent anywhere but your Jira site.
               </p>
             </div>
           </div>
@@ -141,32 +137,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               />
             </div>
 
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-[var(--text-subtle)] uppercase tracking-widest pl-1">Jira Email</label>
-              <input
-                type="email"
-                required
-                className="w-full px-4 py-3 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-xl text-sm font-bold text-[var(--text-main)] focus:ring-2 focus:ring-atlassian-blue outline-none transition-all placeholder:opacity-30"
-                placeholder="user@example.com"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-[var(--text-subtle)] uppercase tracking-widest pl-1">Personal Access Token (PAT)</label>
-              <input
-                type="password"
-                required
-                className="w-full px-4 py-3 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-xl text-sm font-bold text-[var(--text-main)] focus:ring-2 focus:ring-atlassian-blue outline-none transition-all placeholder:opacity-30"
-                placeholder="••••••••••••••••"
-                value={formData.apiToken}
-                onChange={(e) => setFormData({ ...formData, apiToken: e.target.value })}
-              />
-              <p className="px-1 text-[10px] text-[var(--text-subtle)] opacity-60 font-medium">
-                Settings &gt; Personal Access Tokens &gt; Create
-              </p>
-            </div>
+            <p className="px-1 text-[10px] text-[var(--text-subtle)] opacity-60 font-medium">
+              No token needed: log in to this Jira site in Chrome, the extension uses that login.
+            </p>
 
             {/* Country Selector */}
             <div className="space-y-1.5">

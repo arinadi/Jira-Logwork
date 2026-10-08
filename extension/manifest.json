@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Jira Logwork",
+  "version": "1.0.0",
+  "description": "Smart Jira worklog generator — scan your activity, auto-distribute hours, sync in bulk",
+  "host_permissions": ["https://*.atlassian.net/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Open Jira Logwork", "default_icon": { "192": "pwa-192x192.png" } },
+  "icons": { "192": "pwa-192x192.png", "512": "pwa-512x512.png" }
+}

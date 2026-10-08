@@ -1,23 +1,12 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { AuthConfig, AuthContextType, AuthStatus, JiraUser } from '../types/auth';
 import { jiraService } from '../services/jira';
+import { AUTH_STORAGE_KEY, loadSavedConfig } from '../services/authStorage';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const STORAGE_KEY = 'jira_logwork_auth';
-
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [config, setConfig] = useState<AuthConfig | null>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error('Failed to parse saved auth config', e);
-      }
-    }
-    return null;
-  });
+  const [config, setConfig] = useState<AuthConfig | null>(() => loadSavedConfig(localStorage));
   
   const [user, setUser] = useState<JiraUser | null>(null);
   const [status, setStatus] = useState<AuthStatus>(config ? 'connected' : 'idle');
@@ -51,21 +40,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     
     setStatus('error');
-    setError('Failed to connect to Jira. Please check your Domain, Email, and PAT.');
+    setError('Failed to connect to Jira. Check the domain and that you are logged in to Jira in this browser.');
     return false;
   }, []);
 
   // Sync to localStorage and fetch profile on init
   useEffect(() => {
     if (config) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(config));
       // Re-fetch profile if we have a config but no user data yet
       if (!user && status === 'connected') {
         // eslint-disable-next-line react-hooks/set-state-in-effect
         fetchProfile(config);
       }
     } else {
-      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(AUTH_STORAGE_KEY);
       setUser(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

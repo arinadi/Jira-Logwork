@@ -6,6 +6,7 @@ Module 7 (Performance Enhancement): Holiday integration completed.
 - **Sync Engine**: `src/hooks/useSync.ts` handles sequential worklog creation with a mandatory 1-second delay per request to avoid rate limits.
 - **Payload Formatting**: `src/utils/adf.ts` converts text to Atlassian Document Format.
 - **Progress Tracking**: Real-time batch progress (N/total) with visual feedback in both the header and sidebar.
+- **Runtime**: Chrome extension (MV3). `npm run build` → `extension/` (committed). Jira calls go direct with the browser session; no proxy, no PWA.
 - **Holiday Service**: `src/services/holidays.ts` integrates Nager.at API for public holidays. Uses localStorage cache (24h TTL). Country preference stored in `jira_logwork_country` key.
 - **Performance Tracker**: `src/components/DailyCapacityTracker.tsx` shows all calendar dates in entry range with weekend/holiday badges, today indicator, and overtime detection.
 

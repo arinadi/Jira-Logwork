@@ -1,6 +1,8 @@
 import type { AuthConfig } from '../types/auth';
 import { toADF } from '../utils/adf';
 
+const JIRA_CLOUD_DOMAIN = /^[a-z0-9][a-z0-9-]*\.atlassian\.net$/i;
+
 export const jiraService = {
   async testConnection(config: AuthConfig): Promise<boolean> {
     try {
@@ -95,19 +97,25 @@ export const jiraService = {
   },
 
   async apiFetch(config: AuthConfig, path: string, options: RequestInit = {}) {
-    const { domain, email, apiToken } = config;
-    const url = `/api/jira${path}`;
-    const authHeader = btoa(`${email}:${apiToken}`);
+    // The session cookies go to whatever host is called, and the extension only has permission for
+    // *.atlassian.net — so refuse any other host before a request leaves the browser.
+    if (!JIRA_CLOUD_DOMAIN.test(config.domain)) {
+      throw new Error(`Jira domain must look like <site>.atlassian.net, got "${config.domain}"`);
+    }
+    const url = `https://${config.domain}${path}`;
 
     const headers = new Headers(options.headers || {});
-    headers.set('Authorization', `Basic ${authHeader}`);
     headers.set('Accept', 'application/json');
     headers.set('Content-Type', 'application/json');
-    headers.set('x-jira-domain', domain);
+    // Session (cookie) auth on a write needs this opt-out of Jira's XSRF check; it is harmless on reads.
+    headers.set('X-Atlassian-Token', 'no-check');
 
+    // The extension's host permission lets this page call Jira directly with the user's Jira login cookies;
+    // no token is stored or sent.
     return fetch(url, {
       ...options,
       headers,
+      credentials: 'include',
     });
   }
 };
