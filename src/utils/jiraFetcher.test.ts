@@ -28,12 +28,14 @@ interface FakeJiraOptions {
   pageSize?: number;
   /** Each call takes this long (fake timers), so parallel calls overlap and can be counted. */
   latencyMs?: number;
+  /** The live bulkfetch may send dates as epoch milliseconds instead of ISO text. */
+  bulkCreatedAsEpochMs?: boolean;
 }
 
 const adf = (text: string) => ({ type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] });
 
 /** Stands in for the Jira Cloud REST API v3 at https://acme.atlassian.net. */
-function fakeJira({ issues, searchByJql = () => issues.map(i => i.key), pageSize = 2, latencyMs = 0 }: FakeJiraOptions) {
+function fakeJira({ issues, searchByJql = () => issues.map(i => i.key), pageSize = 2, latencyMs = 0, bulkCreatedAsEpochMs = false }: FakeJiraOptions) {
   const calls: string[] = [];
   const byKey = new Map(issues.map(i => [i.key, i]));
   const idOf = (key: string) => `10${issues.findIndex(i => i.key === key)}`;
@@ -85,7 +87,7 @@ function fakeJira({ issues, searchByJql = () => issues.map(i => i.key), pageSize
         .map(ref => byKey.get(ref) || byId.get(ref))
         .filter((i): i is FakeIssue => !!i)
         .flatMap(i => (i.histories || []).map((h, n) => ({ issueId: idOf(i.key), history: {
-          id: `${i.key}-${n}`, author: h.author, created: h.created,
+          id: `${i.key}-${n}`, author: h.author, created: bulkCreatedAsEpochMs ? Date.parse(h.created) : h.created,
           items: [{ field: 'status', fieldId: 'status', fromString: h.from, toString: h.to }],
         } })));
       const offset = Number(body.nextPageToken || '0');
@@ -392,6 +394,17 @@ describe('jiraFetcher.fetchEvents', () => {
     expect(result.entries).toHaveLength(12);
     expect(load.maxInFlight).toBeGreaterThan(1);
     expect(load.maxInFlight).toBeLessThanOrEqual(5);
+  });
+
+  it('reads bulk changelog dates sent as epoch milliseconds', async () => {
+    fakeJira({
+      bulkCreatedAsEpochMs: true,
+      issues: [{ key: 'A-1', histories: [{ author: ME, created: '2026-10-06T10:00:00.000+0700', from: 'Open', to: 'Done' }] }],
+    });
+
+    const result = await scan({ startDate: '2026-10-06', endDate: '2026-10-06' });
+
+    expect(result.entries.map(e => [e.issueKey, e.date, e.comment])).toEqual([['A-1', '2026-10-06', 'Status: Open → Done']]);
   });
 });
 

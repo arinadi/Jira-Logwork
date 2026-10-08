@@ -45,6 +45,7 @@ Find issues:
 
 Status changes of ALL found issues in one go:
   └── POST /changelog/bulkfetch (up to 1000 issues per call, status field only) → your transitions in the range
+        (its dates may come as ISO text or as epoch milliseconds; both are read)
 
 For each issue, 5 issues at a time (every page of comments and worklogs is read):
   ├── Comments  → your own comment per day in the range

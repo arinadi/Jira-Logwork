@@ -17,6 +17,14 @@ export interface FetchParams {
  */
 const ISSUE_CONCURRENCY = 5;
 
+/**
+ * The API spec says bulk changelog dates are ISO text, but the live site sent a non-string (parseISO threw);
+ * epoch milliseconds is Jira's other date form. Accept both so the scan does not depend on which one arrives.
+ */
+function jiraDate(value: string | number): Date {
+  return typeof value === 'number' ? new Date(value) : parseISO(value);
+}
+
 /** Reads a startAt-paged Jira list to the end; Jira may return fewer items than asked, so trust total. */
 async function readAllPages<T>(
   readPage: (startAt: number) => Promise<{ items: T[]; total?: number }>,
@@ -183,7 +191,7 @@ export const jiraFetcher = {
           const key = keyById.get(String(issueLog.issueId)) || String(issueLog.issueId);
           for (const history of issueLog.changeHistories || []) {
             if (history.author?.accountId !== myAccountId) continue;
-            const createdDate = parseISO(history.created);
+            const createdDate = jiraDate(history.created);
             if (!isWithinInterval(createdDate, { start, end })) continue;
             for (const item of history.items || []) {
               if (item.field !== 'status') continue;
