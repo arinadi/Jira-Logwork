@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { loadAllowedComponents, loadDailyTarget, loadTheme, loadWorkingStatuses, parseAllowedComponents, saveAllowedComponents, saveDailyTarget, saveTheme, saveWorkingStatuses } from './preferences';
+import { loadAllowedComponents, loadDailyTarget, loadReadHrms, loadTheme, loadWorkingStatuses, saveReadHrms, parseAllowedComponents, saveAllowedComponents, saveDailyTarget, saveTheme, saveWorkingStatuses } from './preferences';
 
 /** In-memory stand-in for window.localStorage. */
 function memoryStorage(): Storage {
@@ -68,6 +68,17 @@ describe('working statuses', () => {
     saveWorkingStatuses(storage, 'In Progress, Pending Customer Confirmation, in progress');
 
     expect(loadWorkingStatuses(storage)).toEqual(['In Progress', 'Pending Customer Confirmation']);
+  });
+});
+
+describe('read leave from HRMS', () => {
+  it('is on by default and remembers when it is switched off', () => {
+    const storage = memoryStorage();
+    expect(loadReadHrms(storage)).toBe(true);
+
+    saveReadHrms(storage, false);
+
+    expect(loadReadHrms(storage)).toBe(false);
   });
 });
 

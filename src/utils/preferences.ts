@@ -69,3 +69,14 @@ export function loadWorkingStatuses(storage: Storage): string[] {
 export function saveWorkingStatuses(storage: Storage, text: string): void {
   storage.setItem(WORKING_STATUSES_STORAGE_KEY, parseAllowedComponents(text).join(', '));
 }
+
+export const READ_HRMS_STORAGE_KEY = 'jira_logwork_read_hrms';
+
+/** On unless switched off: without leave data, empty-day suggestions would also fill leave days. */
+export function loadReadHrms(storage: Storage): boolean {
+  return storage.getItem(READ_HRMS_STORAGE_KEY) !== 'off';
+}
+
+export function saveReadHrms(storage: Storage, on: boolean): void {
+  storage.setItem(READ_HRMS_STORAGE_KEY, on ? 'on' : 'off');
+}

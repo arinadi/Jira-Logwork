@@ -24,7 +24,7 @@ const dayTitle = (date: string) => (date ? format(parseISO(date), 'EEE dd MMM yy
 function dayStateText(group: DayGroup): { text: string; tone: 'ok' | 'warn' | 'danger' | 'off' | 'none' } {
   if (group.date === '') return { text: 'Fix the date of these rows', tone: 'danger' };
   if (group.state === 'off') {
-    const reason = group.holidayName || 'Weekend';
+    const reason = group.holidayName || (group.isWeekend ? 'Weekend' : 'Leave');
     return group.overtimeMinutes > 0
       ? { text: `${reason} · ${formatMinutes(group.overtimeMinutes)} overtime`, tone: 'off' }
       : { text: reason, tone: 'none' };
@@ -53,7 +53,8 @@ export const DayGroupList: React.FC<DayGroupListProps> = ({ groups, targetMinute
       {groups.map(group => {
         const state = dayStateText(group);
         const headingId = `day-${group.date || 'undated'}`;
-        const fill = targetMinutes > 0 ? Math.min(100, (group.totalMinutes / targetMinutes) * 100) : 0;
+        const dayTarget = group.date ? group.targetMinutes : targetMinutes;
+        const fill = dayTarget > 0 ? Math.min(100, (group.totalMinutes / dayTarget) * 100) : 0;
         return (
           <section key={group.date || 'undated'} aria-labelledby={headingId} className={`card ${group.state === 'off' && group.date ? 'opacity-90' : ''}`}>
             <header className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 border-b bg-[var(--bg-input)]">
@@ -63,9 +64,12 @@ export const DayGroupList: React.FC<DayGroupListProps> = ({ groups, targetMinute
               {group.isToday && <span className="lozenge bg-atlassian-blue text-white">Today</span>}
               <span className="text-sm tabular-nums">
                 {formatMinutes(group.totalMinutes)}
-                {group.state !== 'off' && group.date && <span className="text-[var(--text-subtle)]"> / {formatMinutes(targetMinutes)}</span>}
+                {group.state !== 'off' && group.date && <span className="text-[var(--text-subtle)]"> / {formatMinutes(dayTarget)}</span>}
               </span>
               <span className={`lozenge ${toneClass[state.tone]}`}>{state.text}</span>
+              {group.leaveMinutes > 0 && group.state !== 'off' && (
+                <span className="lozenge bg-[var(--off-bg)] text-[var(--off)]">Leave {formatMinutes(group.leaveMinutes)}</span>
+              )}
               {group.entries.some(e => e.suggestion && e.status === 'ready') && (
                 <button type="button" className="btn h-6 px-2 text-xs" onClick={() => onAcceptSuggestions(group.date)}>
                   Accept suggestions

@@ -16,6 +16,8 @@ export interface FetchParams {
   nonWorkingDays?: string[];
   /** Status names that count as "working on it"; empty = Jira's In Progress category */
   workingStatuses?: string[];
+  /** yyyy-MM-dd → minutes of approved leave that day (from HRMS); lowers that day's target */
+  leaveMinutesByDay?: Record<string, number>;
 }
 
 /**
@@ -127,6 +129,8 @@ export interface ScanResult {
   failedIssues: string[];
   /** Issues with activity but none of the allowed components; no new rows were made for them. */
   outsideComponents: string[];
+  /** The leave of the scanned range, kept with the workspace so day headers can show it */
+  leaveByDay: Record<string, number>;
 }
 
 /** Raw event collected before smart distribution */
@@ -153,7 +157,7 @@ export const jiraFetcher = {
     onProgress?: (current: number, total: number, message: string) => void,
     signal?: AbortSignal
   ): Promise<ScanResult> {
-    const { jql, startDate, endDate, defaultTime = '8h', allowedComponents = [], nonWorkingDays = [], workingStatuses = [] } = params;
+    const { jql, startDate, endDate, defaultTime = '8h', allowedComponents = [], nonWorkingDays = [], workingStatuses = [], leaveMinutesByDay = {} } = params;
     const allowed = new Set(allowedComponents.map(c => c.toLowerCase()));
     const start = parseISO(startDate);
     // End date must include the full day — shift to next midnight so isWithinInterval is inclusive
@@ -409,9 +413,12 @@ export const jiraFetcher = {
         .filter(t => !existingWorklogs.has(`${t.issueKey}::${date}`))
         .map(t => t.issueKey)
         .sort();
+      // Leave hours are not working hours: they come off the day's target before anything is split.
+      const leaveSeconds = (leaveMinutesByDay[date] || 0) * 60;
+      const onFullLeave = leaveSeconds >= dailyHours * 3600;
       // Floor to whole minutes: Jira takes minutes, and rounding up could push the day over target.
-      const freeMinutes = Math.max(0, Math.floor((dailyHours * 3600 - loggedSecondsOnDay) / 60));
-      if (newTickets.length > 0 && freeMinutes === 0) fullDays.push(date);
+      const freeMinutes = Math.max(0, Math.floor((dailyHours * 3600 - leaveSeconds - loggedSecondsOnDay) / 60));
+      if (newTickets.length > 0 && freeMinutes === 0 && !onFullLeave) fullDays.push(date);
       const parts = splitMinutes(freeMinutes, newTickets.length || 1);
       const newMinutes = new Map(newTickets.map((k, i) => [k, parts[i]]));
 
@@ -474,8 +481,8 @@ export const jiraFetcher = {
     };
 
     const nonWorking = new Set(nonWorkingDays);
-    const suggest = (date: string, rows: Array<{ issueKey: string; comment: string }>, suggestion: 'in-progress' | 'carry-over') => {
-      const parts = splitMinutes(targetMinutes, rows.length);
+    const suggest = (date: string, dayTarget: number, rows: Array<{ issueKey: string; comment: string }>, suggestion: 'in-progress' | 'carry-over') => {
+      const parts = splitMinutes(dayTarget, rows.length);
       rows.forEach((row, i) => {
         if (parts[i] === 0) return;
         entries.push({
@@ -496,7 +503,9 @@ export const jiraFetcher = {
     let workingDaysSinceActive = 0;
     for (const day of eachDayOfInterval({ start, end: addDays(end, -1) })) {
       const date = format(day, 'yyyy-MM-dd');
-      if (isWeekend(day) || nonWorking.has(date)) continue;
+      const dayTarget = targetMinutes - (leaveMinutesByDay[date] || 0);
+      // A full leave day is not a working day: not a carry-over source, not counted toward the carry-over limit.
+      if (isWeekend(day) || nonWorking.has(date) || dayTarget <= 0) continue;
       const realRows = entries.filter(e => e.date === date && !e.suggestion);
       if (realRows.length > 0) {
         lastActiveRows = realRows;
@@ -510,7 +519,7 @@ export const jiraFetcher = {
       const dayEnd = addDays(day, 1).getTime();
       const inProgress = allIssueKeys.filter(key => isAllowed(key) && workedOn(key, dayStart, dayEnd)).sort();
       if (inProgress.length > 0) {
-        suggest(date, inProgress.map(key => ({ issueKey: key, comment: `In progress: ${issueMap.get(key) || key}` })), 'in-progress');
+        suggest(date, dayTarget, inProgress.map(key => ({ issueKey: key, comment: `In progress: ${issueMap.get(key) || key}` })), 'in-progress');
         continue;
       }
 
@@ -522,7 +531,7 @@ export const jiraFetcher = {
           .filter(r => isAllowed(r.issueKey) && !seen.has(r.issueKey) && seen.add(r.issueKey))
           .sort((a, b) => a.issueKey.localeCompare(b.issueKey))
           .map(r => ({ issueKey: r.issueKey, comment: `Continued: ${r.comment}` }));
-        if (carried.length > 0) suggest(date, carried, 'carry-over');
+        if (carried.length > 0) suggest(date, dayTarget, carried, 'carry-over');
       }
       // 3. Otherwise the day stays empty on purpose.
     }
@@ -532,7 +541,8 @@ export const jiraFetcher = {
 
     onProgress?.(totalSteps, totalSteps, `Done! ${entries.length} worklogs across ${byDate.size} days.`);
     fullDays.sort();
-    return { entries, fullDays, failedIssues, outsideComponents: Array.from(outsideComponents).sort() };
+    const leaveByDay = Object.fromEntries(Object.entries(leaveMinutesByDay).filter(([date]) => date >= startDate && date <= endDate));
+    return { entries, fullDays, failedIssues, outsideComponents: Array.from(outsideComponents).sort(), leaveByDay };
   }
 };
 

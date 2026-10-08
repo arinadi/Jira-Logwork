@@ -26,3 +26,24 @@ export function loadWorkspace(storage: Storage): WorklogEntry[] {
     ? { ...e, status: 'failed', errorMessage: 'Sync was interrupted — check Jira before retry.' }
     : e);
 }
+
+export const LEAVE_STORAGE_KEY = 'jira_logwork_leave';
+
+/**
+ * Stores the leave a scan read for its range. Days of that range are replaced (leave may have been cancelled
+ * since); days outside it are kept, so an older, wider scan still shows its leave.
+ */
+export function saveLeave(storage: Storage, range: { startDate: string; endDate: string }, leaveByDay: Record<string, number>): void {
+  const kept = Object.entries(loadLeave(storage)).filter(([date]) => date < range.startDate || date > range.endDate);
+  storage.setItem(LEAVE_STORAGE_KEY, JSON.stringify({ ...Object.fromEntries(kept), ...leaveByDay }));
+}
+
+export function loadLeave(storage: Storage): Record<string, number> {
+  try {
+    const parsed = JSON.parse(storage.getItem(LEAVE_STORAGE_KEY) || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch (e) {
+    console.error('Saved leave is not valid JSON; ignoring it', e);
+    return {};
+  }
+}

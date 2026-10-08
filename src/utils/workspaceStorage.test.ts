@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { loadWorkspace, saveWorkspace } from './workspaceStorage';
+import { loadLeave, loadWorkspace, saveLeave, saveWorkspace } from './workspaceStorage';
 import type { WorklogEntry } from '../types/worklog';
 
 /** In-memory stand-in for window.localStorage. */
@@ -38,3 +38,16 @@ describe('workspace storage', () => {
     expect(restored.errorMessage).toMatch(/check Jira before retry/i);
   });
 });
+
+describe('leave storage', () => {
+  it('keeps leave per day; a new scan replaces only the days of its own range', () => {
+    const storage = memoryStorage();
+    saveLeave(storage, { startDate: '2026-09-01', endDate: '2026-09-30' }, { '2026-09-07': 240, '2026-09-21': 480 });
+
+    // Rescan of 15–30 Sep: the 21st was cancelled, the 22nd is new; the 7th is outside and stays.
+    saveLeave(storage, { startDate: '2026-09-15', endDate: '2026-09-30' }, { '2026-09-22': 480 });
+
+    expect(loadLeave(storage)).toEqual({ '2026-09-07': 240, '2026-09-22': 480 });
+  });
+});
+

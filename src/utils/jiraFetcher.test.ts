@@ -190,7 +190,7 @@ function fakeJira({ issues, searchByJql = () => issues.map(i => i.key), pageSize
 }
 
 /** Runs a scan to the end while fake timers skip the throttle delays. */
-async function scan(params: { jql?: string; startDate: string; endDate: string; defaultTime?: string; allowedComponents?: string[]; nonWorkingDays?: string[]; workingStatuses?: string[] }) {
+async function scan(params: { jql?: string; startDate: string; endDate: string; defaultTime?: string; allowedComponents?: string[]; nonWorkingDays?: string[]; workingStatuses?: string[]; leaveMinutesByDay?: Record<string, number> }) {
   const pending = jiraFetcher.fetchEvents(config, { jql: params.jql ?? 'project = A', ...params });
   await vi.runAllTimersAsync();
   return pending;
@@ -582,6 +582,47 @@ describe('jiraFetcher.fetchEvents', () => {
       const result = await scan({ startDate: '2026-10-05', endDate: '2026-10-08', workingStatuses: ['pending customer confirmation'] });
 
       expect(rowsOn(result.entries, '2026-10-06')).toEqual([['X-1', '8h', 'in-progress', 'In progress: Waiting on customer']]);
+    });
+  });
+
+  describe('leave', () => {
+    it('lowers the target on a half leave day and makes no rows or suggestions on a full leave day', async () => {
+      fakeJira({
+        issues: [{ key: 'A-1', comments: [
+          { author: ME, created: '2026-10-05T10:00:00.000+0700', text: 'monday' },
+          { author: ME, created: '2026-10-06T10:00:00.000+0700', text: 'tuesday' },
+          { author: ME, created: '2026-10-07T10:00:00.000+0700', text: 'answered a question while on leave' },
+        ] }],
+      });
+
+      const result = await scan({
+        startDate: '2026-10-05', endDate: '2026-10-08',
+        leaveMinutesByDay: { '2026-10-05': 240, '2026-10-07': 480, '2026-10-08': 480, '2026-09-01': 480 },
+      });
+
+      expect(result.entries.map(e => [e.date, e.issueKey, e.timeSpent, e.suggestion])).toEqual([
+        ['2026-10-05', 'A-1', '4h', undefined],
+        ['2026-10-06', 'A-1', '8h', undefined],
+      ]);
+      expect(result.fullDays).toEqual([]);
+      expect(result.leaveByDay).toEqual({ '2026-10-05': 240, '2026-10-07': 480, '2026-10-08': 480 });
+    });
+
+    it('suggests only the hours left after a half day of leave', async () => {
+      fakeJira({
+        issues: [
+          { key: 'A-1', comments: [{ author: ME, created: '2026-10-05T10:00:00.000+0700', text: 'monday' }] },
+          {
+            key: 'X-1', currentStatus: 'In Progress', currentAssignee: ME,
+            assigneeChanges: [{ created: '2026-10-01T09:00:00.000+0700', from: null, to: ME }],
+          },
+        ],
+      });
+
+      const result = await scan({ startDate: '2026-10-05', endDate: '2026-10-06', leaveMinutesByDay: { '2026-10-06': 240 } });
+
+      expect(result.entries.filter(e => e.date === '2026-10-06').map(e => [e.issueKey, e.timeSpent, e.suggestion]))
+        .toEqual([['X-1', '4h', 'in-progress']]);
     });
   });
 });

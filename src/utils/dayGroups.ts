@@ -17,6 +17,10 @@ export interface DayGroup {
   isToday: boolean;
   isWeekend: boolean;
   holidayName?: string;
+  /** Approved leave that day; a full day of leave makes the day 'off' */
+  leaveMinutes: number;
+  /** The day's target after leave; 0 on an off day */
+  targetMinutes: number;
 }
 
 export interface DayGroupOptions {
@@ -25,6 +29,8 @@ export interface DayGroupOptions {
   holidays: Map<string, string>;
   /** yyyy-MM-dd */
   today: string;
+  /** yyyy-MM-dd → minutes of approved leave */
+  leave?: Map<string, number>;
 }
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -55,8 +61,10 @@ export function groupByDay(entries: WorklogEntry[], options: DayGroupOptions): D
       const totalMinutes = dayEntries.reduce((sum, e) => sum + entryMinutes(e), 0);
       const weekend = isWeekend(day);
       const holidayName = options.holidays.get(date);
-      const off = weekend || holidayName !== undefined;
-      const target = options.targetMinutes;
+      const leaveMinutes = options.leave?.get(date) || 0;
+      // Leave hours are not owed: they come off the target, and a full leave day is off like a holiday.
+      const target = Math.max(0, options.targetMinutes - leaveMinutes);
+      const off = weekend || holidayName !== undefined || target === 0;
       groups.push({
         date,
         entries: dayEntries,
@@ -68,6 +76,8 @@ export function groupByDay(entries: WorklogEntry[], options: DayGroupOptions): D
         isToday: date === options.today,
         isWeekend: weekend,
         holidayName,
+        leaveMinutes,
+        targetMinutes: off ? 0 : target,
       });
     }
   }
@@ -77,7 +87,7 @@ export function groupByDay(entries: WorklogEntry[], options: DayGroupOptions): D
     // Rows without a date (e.g. from a CSV) must stay visible so the user can fix them.
     groups.push({
       date: '', entries: undated, totalMinutes, state: 'off', missingMinutes: 0, overtimeMinutes: 0,
-      isToday: false, isWeekend: false,
+      isToday: false, isWeekend: false, leaveMinutes: 0, targetMinutes: 0,
     });
   }
   return groups;
@@ -90,13 +100,14 @@ export interface RangeSummary {
 }
 
 /** Logged vs. expected over the dated range; undated rows are not part of any day, so they are left out. */
-export function rangeSummary(groups: DayGroup[], targetMinutes: number): RangeSummary {
+export function rangeSummary(groups: DayGroup[], dailyTargetMinutes: number): RangeSummary {
   const dated = groups.filter(g => g.date !== '');
-  const workingDays = dated.filter(g => g.state !== 'off').length;
+  const working = dated.filter(g => g.state !== 'off');
   return {
     loggedMinutes: dated.reduce((sum, g) => sum + g.totalMinutes, 0),
-    targetMinutes: workingDays * targetMinutes,
-    workingDays,
+    // Per-day targets, so partial leave lowers the expected total; leave only ever lowers a day, never raises it.
+    targetMinutes: working.reduce((sum, g) => sum + Math.min(g.targetMinutes, dailyTargetMinutes), 0),
+    workingDays: working.length,
   };
 }
 

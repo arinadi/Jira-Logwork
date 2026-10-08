@@ -6,12 +6,14 @@ import { jiraFetcher, type FetchParams, type ScanResult } from '../utils/jiraFet
 import { defaultScanJql, defaultScanRange, scanPresetRange, type ScanPreset } from '../utils/scanDefaults';
 import { csvExporter } from '../utils/csvExporter';
 import { holidayService } from '../services/holidays';
+import { fetchHrmsLeave } from '../services/hrms';
+import { leaveMinutesByDay } from '../utils/hrmsLeave';
 import type { WorklogEntry } from '../types/worklog';
 import { Dialog } from './Dialog';
 
 interface JiraFetchDialogProps {
   onClose: () => void;
-  onImport: (entries: WorklogEntry[]) => void;
+  onImport: (entries: WorklogEntry[], leave: { range: { startDate: string; endDate: string }; byDay: Record<string, number> } | null) => void;
 }
 
 const PRESETS: Array<{ id: ScanPreset; label: string }> = [
@@ -22,7 +24,7 @@ const PRESETS: Array<{ id: ScanPreset; label: string }> = [
 
 export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ onClose, onImport }) => {
   const { config } = useAuth();
-  const { dailyTarget, allowedComponents, workingStatuses, holidayCountry } = usePreferences();
+  const { dailyTarget, allowedComponents, workingStatuses, holidayCountry, readHrms } = usePreferences();
   // Lazy init: the parent mounts this dialog on open, so "today" is the day the dialog is opened.
   const [range, setRange] = useState(() => defaultScanRange(new Date()));
   const [customJql, setCustomJql] = useState<string | null>(null);
@@ -33,6 +35,10 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ onClose, onImp
   const [progress, setProgress] = useState({ current: 0, total: 0, message: '' });
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [hrmsWarning, setHrmsWarning] = useState<string | null>(null);
+  // null = HRMS not read (off or failed): then stored leave must not be replaced by "no leave".
+  const [leaveRead, setLeaveRead] = useState<boolean>(false);
+  const [scannedRange, setScannedRange] = useState(range);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const handleFetch = async () => {
@@ -43,6 +49,9 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ onClose, onImp
     setIsLoading(true);
     setScan(null);
     setError(null);
+    setHrmsWarning(null);
+    setLeaveRead(false);
+    setScannedRange(range);
     setProgress({ current: 0, total: 0, message: 'Starting scan…' });
 
     const controller = new AbortController();
@@ -56,7 +65,19 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ onClose, onImp
         return [];
       })
     ))).flat().map(h => h.date);
-    const params: FetchParams = { ...range, jql, defaultTime: dailyTarget, allowedComponents, workingStatuses, nonWorkingDays };
+    // Leave is optional input: without it the scan still works, it just may suggest work on leave days.
+    let leave: Record<string, number> = {};
+    if (readHrms) {
+      try {
+        setProgress({ current: 0, total: 0, message: 'Reading leave from HRMS…' });
+        leave = leaveMinutesByDay(await fetchHrmsLeave(controller.signal));
+        setLeaveRead(true);
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') throw err;
+        setHrmsWarning(`Leave not read: ${(err as Error).message}`);
+      }
+    }
+    const params: FetchParams = { ...range, jql, defaultTime: dailyTarget, allowedComponents, workingStatuses, nonWorkingDays, leaveMinutesByDay: leave };
 
     try {
       const scanResult = await jiraFetcher.fetchEvents(
@@ -97,7 +118,8 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ onClose, onImp
       >
         <Download className="w-4 h-4" aria-hidden="true" /> Export CSV
       </button>
-      <button type="button" className="btn-primary" disabled={entries.length === 0} onClick={() => { onImport(entries); onClose(); }}>
+      <button type="button" className="btn-primary" disabled={entries.length === 0}
+        onClick={() => { onImport(entries, leaveRead && scan ? { range: scannedRange, byDay: scan.leaveByDay } : null); onClose(); }}>
         Add {entries.length} rows to workspace
       </button>
     </>
@@ -147,6 +169,16 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ onClose, onImp
           {scan.failedIssues.length > 0 && (
             <p role="alert" className="px-2 py-1.5 rounded-[3px] text-sm bg-[var(--danger-bg)] text-[var(--danger)]">
               Partial result: could not read {scan.failedIssues.join(', ')}. Their activity is missing.
+            </p>
+          )}
+          {hrmsWarning && (
+            <p role="alert" className="px-2 py-1.5 rounded-[3px] text-sm bg-[var(--warn-bg)] text-[var(--warn)]">
+              {hrmsWarning} Suggestions may land on leave days — check them before accepting.
+            </p>
+          )}
+          {leaveRead && Object.keys(scan.leaveByDay).length > 0 && (
+            <p className="px-2 py-1.5 rounded-[3px] text-sm bg-[var(--bg-input)] text-[var(--text-subtle)]">
+              Leave from HRMS: {Object.keys(scan.leaveByDay).length} days in this range.
             </p>
           )}
           {entries.some(e => e.suggestion) && (

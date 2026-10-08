@@ -15,6 +15,8 @@ import { useSync } from './hooks/useSync';
 import { useHolidays } from './hooks/useHolidays';
 import { formatMinutes, groupByDay, rangeSummary } from './utils/dayGroups';
 import { loadTheme, saveTheme, type Theme } from './utils/preferences';
+import { loadLeave, saveLeave } from './utils/workspaceStorage';
+import type { WorklogEntry } from './types/worklog';
 import { isBatchSyncable } from './utils/syncRules';
 
 function AppContent() {
@@ -22,6 +24,7 @@ function AppContent() {
   const [theme, setTheme] = useState<Theme>(() => loadTheme(localStorage, window.matchMedia('(prefers-color-scheme: dark)').matches));
   const [showSummary, setShowSummary] = useState(false);
   const [showFetchDialog, setShowFetchDialog] = useState(false);
+  const [leave, setLeave] = useState(() => loadLeave(localStorage));
   const { config } = useAuth();
   const { dailyTargetMinutes, holidayCountry, allowedComponents } = usePreferences();
 
@@ -47,8 +50,8 @@ function AppContent() {
   }, [entries]);
   const holidays = useHolidays(years, holidayCountry);
   const groups = useMemo(
-    () => groupByDay(entries, { targetMinutes: dailyTargetMinutes, holidays, today: format(new Date(), 'yyyy-MM-dd') }),
-    [entries, dailyTargetMinutes, holidays]
+    () => groupByDay(entries, { targetMinutes: dailyTargetMinutes, holidays, today: format(new Date(), 'yyyy-MM-dd'), leave: new Map(Object.entries(leave)) }),
+    [entries, dailyTargetMinutes, holidays, leave]
   );
   const summary = rangeSummary(groups, dailyTargetMinutes);
   const dated = groups.filter(g => g.date !== '');
@@ -57,6 +60,14 @@ function AppContent() {
   const suggestedCount = entries.filter(e => e.suggestion && e.status === 'ready').length;
   const syncedCount = entries.filter(e => e.status === 'synced').length;
   const failedCount = entries.filter(e => e.status === 'failed' || e.status === 'error').length;
+
+  const handleImport = (fetched: WorklogEntry[], scanLeave: { range: { startDate: string; endDate: string }; byDay: Record<string, number> } | null) => {
+    addEntries(fetched);
+    if (scanLeave) {
+      saveLeave(localStorage, scanLeave.range, scanLeave.byDay);
+      setLeave(loadLeave(localStorage));
+    }
+  };
 
   const handleSyncAll = async () => {
     await syncAllValid();
@@ -162,7 +173,7 @@ function AppContent() {
       )}
       {showSummary && <SummaryDashboard entries={entries} onClose={() => setShowSummary(false)} />}
       {/* Mounted only while open, so its date defaults are taken at open time */}
-      {showFetchDialog && <JiraFetchDialog onClose={() => setShowFetchDialog(false)} onImport={addEntries} />}
+      {showFetchDialog && <JiraFetchDialog onClose={() => setShowFetchDialog(false)} onImport={handleImport} />}
     </div>
   );
 }

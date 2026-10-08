@@ -56,3 +56,22 @@ describe('rangeSummary', () => {
     expect(rangeSummary(groups, 8 * 60)).toEqual({ loggedMinutes: 15 * 60, targetMinutes: 16 * 60, workingDays: 2 });
   });
 });
+
+describe('groupByDay with leave', () => {
+  it('treats a full leave day as off and lowers the target of a partial leave day', () => {
+    const leave = new Map([['2026-10-06', 480], ['2026-10-07', 240]]);
+    const groups = groupByDay([
+      row('A-1', '2026-10-05', '8h'),
+      row('A-1', '2026-10-07', '3h'),   // Wed: 4h leave → target 4h, 1h missing
+      row('A-1', '2026-10-08', '8h'),
+    ], { ...options, today: '2026-10-01', leave });
+
+    expect(groups.map(g => [g.date, g.state, g.targetMinutes, g.missingMinutes, g.leaveMinutes])).toEqual([
+      ['2026-10-05', 'met', 480, 0, 0],
+      ['2026-10-06', 'off', 0, 0, 480],
+      ['2026-10-07', 'under', 240, 60, 240],
+      ['2026-10-08', 'met', 480, 0, 0],
+    ]);
+    expect(rangeSummary(groups, 8 * 60)).toEqual({ loggedMinutes: 19 * 60, targetMinutes: 20 * 60, workingDays: 3 });
+  });
+});

@@ -13,12 +13,13 @@ interface SettingsModalProps {
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
   const { config, user, error, saveConfig, disconnect } = useAuth();
-  const { dailyTarget, setDailyTarget, holidayCountry, setHolidayCountry, allowedComponents, setAllowedComponents, workingStatuses, setWorkingStatuses } = usePreferences();
+  const { dailyTarget, setDailyTarget, holidayCountry, setHolidayCountry, allowedComponents, setAllowedComponents, workingStatuses, setWorkingStatuses, readHrms, setReadHrms } = usePreferences();
   const [domain, setDomain] = useState(config?.domain || '');
   const [target, setTarget] = useState(dailyTarget);
   const [country, setCountry] = useState(holidayCountry);
   const [components, setComponents] = useState(allowedComponents.join(', '));
   const [statuses, setStatuses] = useState(workingStatuses.join(', '));
+  const [hrms, setHrms] = useState(readHrms);
   const [countries, setCountries] = useState<AvailableCountry[]>([]);
   const [countriesLoading, setCountriesLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -39,6 +40,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
     setHolidayCountry(country);
     setAllowedComponents(components);
     setWorkingStatuses(statuses);
+    setReadHrms(hrms);
     const connected = await saveConfig({ domain });
     setSaving(false);
     if (connected) onClose();
@@ -142,6 +144,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
           />
           <p id="settings-statuses-help" className="mt-1 text-xs text-[var(--text-subtle)]">
             For days without ticket activity: tickets assigned to you in one of these statuses are suggested. Empty = In Progress, Research, QA, Code Review…; waiting statuses like Pending Customer Confirmation are not counted.
+          </p>
+        </div>
+
+        <div>
+          <label className="flex items-start gap-2 text-sm cursor-pointer">
+            <input type="checkbox" className="mt-0.5" checked={hrms} onChange={(e) => setHrms(e.target.checked)} aria-describedby="settings-hrms-help" />
+            <span>Read leave from HRMS</span>
+          </label>
+          <p id="settings-hrms-help" className="mt-1 ml-6 text-xs text-[var(--text-subtle)]">
+            Each scan reads your approved leave from hrms.gameloft.org (stay logged in there). Leave days get no rows; half days lower the target. Only dates, times, type and status are used.
           </p>
         </div>
 

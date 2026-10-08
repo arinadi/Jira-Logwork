@@ -16,6 +16,9 @@ export interface PreferencesContextType {
   /** Status names counted as "working on it" for empty days; empty = Jira's In Progress category */
   workingStatuses: string[];
   setWorkingStatuses: (text: string) => void;
+  /** Read approved leave from Gameloft HRMS on every scan */
+  readHrms: boolean;
+  setReadHrms: (on: boolean) => void;
 }
 
 export const PreferencesContext = createContext<PreferencesContextType | undefined>(undefined);
