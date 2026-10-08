@@ -16,6 +16,8 @@ interface FakeIssue {
   comments?: FakeComment[];
   worklogs?: FakeWorklog[];
   fail?: boolean;
+  /** The first comments call answers 429 with this Retry-After (seconds); later calls succeed. */
+  rateLimitOnceSeconds?: number;
 }
 
 interface FakeJiraOptions {
@@ -24,18 +26,35 @@ interface FakeJiraOptions {
   searchByJql?: (jql: string) => string[];
   /** Real Jira may return fewer items than maxResults; force small pages to exercise paging. */
   pageSize?: number;
+  /** Each call takes this long (fake timers), so parallel calls overlap and can be counted. */
+  latencyMs?: number;
 }
 
 const adf = (text: string) => ({ type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] });
 
 /** Stands in for the Jira Cloud REST API v3 at https://acme.atlassian.net. */
-function fakeJira({ issues, searchByJql = () => issues.map(i => i.key), pageSize = 2 }: FakeJiraOptions) {
+function fakeJira({ issues, searchByJql = () => issues.map(i => i.key), pageSize = 2, latencyMs = 0 }: FakeJiraOptions) {
   const calls: string[] = [];
   const byKey = new Map(issues.map(i => [i.key, i]));
+  const idOf = (key: string) => `10${issues.findIndex(i => i.key === key)}`;
+  const byId = new Map(issues.map(i => [idOf(i.key), i]));
+  const rateLimited = new Set<string>();
+  const load = { inFlight: 0, maxInFlight: 0 };
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
-  const handler = async (input: string | URL | Request) => {
+  const handler = async (input: string | URL | Request, init?: RequestInit) => {
+    load.inFlight++;
+    load.maxInFlight = Math.max(load.maxInFlight, load.inFlight);
+    try {
+      if (latencyMs > 0) await new Promise(resolve => setTimeout(resolve, latencyMs));
+      return route(input, init);
+    } finally {
+      load.inFlight--;
+    }
+  };
+
+  const route = (input: string | URL | Request, init?: RequestInit) => {
     const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const url = new URL(raw);
     if (url.origin !== 'https://acme.atlassian.net') throw new Error(`fakeJira: unexpected host ${url.origin}`);
@@ -53,9 +72,30 @@ function fakeJira({ issues, searchByJql = () => issues.map(i => i.key), pageSize
       const next = offset + pageSize;
       const isLast = next >= keys.length;
       return json({
-        issues: page.map(k => ({ key: k, fields: { summary: byKey.get(k)?.summary || `Summary ${k}` } })),
+        issues: page.map(k => ({ id: idOf(k), key: k, fields: { summary: byKey.get(k)?.summary || `Summary ${k}` } })),
         isLast,
         ...(isLast ? {} : { nextPageToken: String(next) }),
+      });
+    }
+
+    if (path === '/rest/api/3/changelog/bulkfetch' && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body)) as { issueIdsOrKeys: string[]; fieldIds?: string[]; nextPageToken?: string };
+      // Oldest first across issues, as the real endpoint; paged by an opaque cursor.
+      const all = body.issueIdsOrKeys
+        .map(ref => byKey.get(ref) || byId.get(ref))
+        .filter((i): i is FakeIssue => !!i)
+        .flatMap(i => (i.histories || []).map((h, n) => ({ issueId: idOf(i.key), history: {
+          id: `${i.key}-${n}`, author: h.author, created: h.created,
+          items: [{ field: 'status', fieldId: 'status', fromString: h.from, toString: h.to }],
+        } })));
+      const offset = Number(body.nextPageToken || '0');
+      const page = all.slice(offset, offset + pageSize);
+      const byIssue = new Map<string, unknown[]>();
+      for (const { issueId, history } of page) byIssue.set(issueId, [...(byIssue.get(issueId) || []), history]);
+      const next = offset + pageSize;
+      return json({
+        issueChangeLogs: Array.from(byIssue, ([issueId, changeHistories]) => ({ issueId, changeHistories })),
+        ...(next < all.length ? { nextPageToken: String(next) } : {}),
       });
     }
 
@@ -64,6 +104,10 @@ function fakeJira({ issues, searchByJql = () => issues.map(i => i.key), pageSize
       const issue = byKey.get(m[1]);
       if (!issue) return json({ errorMessages: ['Issue does not exist'] }, 404);
       if (issue.fail) return json({ errorMessages: ['Rate limited'] }, 429);
+      if (m[2] === 'comment' && issue.rateLimitOnceSeconds && !rateLimited.has(issue.key)) {
+        rateLimited.add(issue.key);
+        return new Response('{}', { status: 429, headers: { 'Retry-After': String(issue.rateLimitOnceSeconds) } });
+      }
       const startAt = Number(url.searchParams.get('startAt') || '0');
 
       if (m[2] === 'changelog') {
@@ -99,7 +143,7 @@ function fakeJira({ issues, searchByJql = () => issues.map(i => i.key), pageSize
   };
 
   vi.stubGlobal('fetch', vi.fn(handler));
-  return { calls };
+  return { calls, load };
 }
 
 /** Runs a scan to the end while fake timers skip the throttle delays. */
@@ -278,4 +322,76 @@ describe('jiraFetcher.fetchEvents', () => {
     expect(result.failedIssues).toEqual(['A-1']);
     expect(result.entries.map(e => e.issueKey)).toEqual(['A-2']);
   });
+
+  it('reads status changes of all issues with the bulk changelog call, not one call per issue', async () => {
+    const keys = ['A-1', 'A-2', 'A-3'];
+    const { calls } = fakeJira({
+      issues: keys.map(key => ({
+        key,
+        histories: [{ author: ME, created: '2026-10-06T10:00:00.000+0700', from: 'Open', to: 'Done' }],
+      })),
+    });
+
+    const result = await scan({ startDate: '2026-10-06', endDate: '2026-10-06' });
+
+    expect(result.entries.map(e => [e.issueKey, e.comment])).toEqual(keys.map(k => [k, 'Status: Open → Done']));
+    expect(calls.filter(c => c.startsWith('/rest/api/3/changelog/bulkfetch')).length).toBeGreaterThan(0);
+    expect(calls.filter(c => /\/issue\/[^/]+\/changelog/.test(c))).toEqual([]);
+  });
+
+  it('does not wait between calls when Jira does not ask it to', async () => {
+    fakeJira({
+      issues: ['A-1', 'A-2', 'A-3', 'A-4', 'A-5'].map(key => ({
+        key,
+        comments: [{ author: ME, created: '2026-10-06T10:00:00.000+0700', text: key }],
+      })),
+    });
+    const before = Date.now();
+
+    const result = await scan({ startDate: '2026-10-06', endDate: '2026-10-06' });
+
+    expect(result.entries).toHaveLength(5);
+    expect(Date.now() - before).toBe(0);
+  });
+
+  it('waits Retry-After seconds and retries when Jira answers 429', async () => {
+    fakeJira({
+      issues: [{
+        key: 'A-1',
+        rateLimitOnceSeconds: 3,
+        comments: [{ author: ME, created: '2026-10-06T10:00:00.000+0700', text: 'after retry' }],
+      }],
+    });
+    const before = Date.now();
+
+    const result = await scan({ startDate: '2026-10-06', endDate: '2026-10-06' });
+
+    expect(result.failedIssues).toEqual([]);
+    expect(result.entries.map(e => e.comment)).toEqual(['after retry']);
+    expect(Date.now() - before).toBe(3000);
+  });
+
+  it('gives up after repeated 429 and lists the issue as failed', async () => {
+    fakeJira({ issues: [{ key: 'A-1', fail: true }, { key: 'A-2', comments: [{ author: ME, created: '2026-10-06T10:00:00.000+0700', text: 'ok' }] }] });
+
+    const result = await scan({ startDate: '2026-10-06', endDate: '2026-10-06' });
+
+    expect(result.failedIssues).toEqual(['A-1']);
+    expect(result.entries.map(e => e.issueKey)).toEqual(['A-2']);
+  });
+
+  it('fetches comments and worklogs for several issues at once, at most 5 calls in flight', async () => {
+    const keys = Array.from({ length: 12 }, (_, i) => `A-${i + 1}`);
+    const { load } = fakeJira({
+      latencyMs: 100,
+      issues: keys.map(key => ({ key, comments: [{ author: ME, created: '2026-10-06T10:00:00.000+0700', text: key }] })),
+    });
+
+    const result = await scan({ startDate: '2026-10-06', endDate: '2026-10-06' });
+
+    expect(result.entries).toHaveLength(12);
+    expect(load.maxInFlight).toBeGreaterThan(1);
+    expect(load.maxInFlight).toBeLessThanOrEqual(5);
+  });
 });
+

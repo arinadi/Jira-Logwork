@@ -52,6 +52,20 @@ export const jiraService = {
   },
 
   /**
+   * Fetches one page of status changelogs for up to 1000 issues at once, oldest first.
+   * The response is keyed by issue ID, not key.
+   */
+  async bulkFetchStatusChangelogs(config: AuthConfig, issueIdsOrKeys: string[], nextPageToken?: string, signal?: AbortSignal) {
+    const response = await this.apiFetch(config, '/rest/api/3/changelog/bulkfetch', {
+      method: 'POST',
+      body: JSON.stringify({ issueIdsOrKeys, fieldIds: ['status'], maxResults: 1000, ...(nextPageToken ? { nextPageToken } : {}) }),
+      signal,
+    });
+    if (!response.ok) throw new Error(`Bulk changelog fetch failed (${response.status})`);
+    return response.json();
+  },
+
+  /**
    * Fetches one page of comments for an issue, newest first
    */
   async getIssueComments(config: AuthConfig, issueKey: string, startAt = 0, signal?: AbortSignal) {
@@ -112,10 +126,31 @@ export const jiraService = {
 
     // The extension's host permission lets this page call Jira directly with the user's Jira login cookies;
     // no token is stored or sent.
-    return fetch(url, {
-      ...options,
-      headers,
-      credentials: 'include',
-    });
+    const send = () => fetch(url, { ...options, headers, credentials: 'include' });
+
+    // No fixed delay between calls: wait only when Jira says so (429), as Atlassian's rate-limit guide asks.
+    // A 429 means the request was not processed, so retrying is safe even for a POST.
+    let response = await send();
+    for (let retry = 0; response.status === 429 && retry < MAX_RATE_LIMIT_RETRIES; retry++) {
+      const retryAfter = Number(response.headers.get('Retry-After'));
+      const waitMs = retryAfter > 0 ? retryAfter * 1000 : 2000 * 2 ** retry;
+      await sleep(waitMs, options.signal ?? undefined);
+      response = await send();
+    }
+    return response;
   }
 };
+
+const MAX_RATE_LIMIT_RETRIES = 4;
+
+/** Waits, but stops at once when the scan is cancelled. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new DOMException('Aborted', 'AbortError'));
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    }, { once: true });
+  });
+}

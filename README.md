@@ -43,11 +43,16 @@ Find issues:
   │     (commenting makes you a watcher by default; Jira Cloud has no "commented by" clause)
   └── Plus every issue where you logged work in the range (so the day total sees all your worklogs)
 
-For each issue (every page of changelog, comments and worklogs is read):
-  ├── Changelog → your status transitions in the range
+Status changes of ALL found issues in one go:
+  └── POST /changelog/bulkfetch (up to 1000 issues per call, status field only) → your transitions in the range
+
+For each issue, 5 issues at a time (every page of comments and worklogs is read):
   ├── Comments  → your own comment per day in the range
   ├── Worklogs  → your worklogs in the range (startedAfter/startedBefore)
   └── One entry per issue per active day
+
+Rate limits: no fixed waiting between calls. When Jira answers 429, the call waits Retry-After
+seconds (2s, 4s, 8s, 16s if Jira gives none) and retries up to 4 times; then the issue is listed as failed.
 
 Then, per day:
   ├── Issue already has your worklog → "synced" row with the REAL logged time (locked)
@@ -79,7 +84,7 @@ This application is a Chrome extension (Manifest V3) built as a static web app u
 ### ⚙️ Core Logic Modules
 - **`jiraService`**: Calls Jira REST API v3 directly at `https://<domain>` with the browser's Jira session (`credentials: 'include'` + `X-Atlassian-Token: no-check`), no Authorization header. Accepts only `*.atlassian.net` domains, the sites the extension has host permission for. Includes ADF (Atlassian Document Format) payload transformation.
 - **`useSync`**: Orchestrates sequential batch uploads with a mandatory **1-second cooldown** between requests to prevent Jira API rate limiting (429 errors).
-- **`jiraFetcher`**: The Smart Fetch engine. Paginates through JQL results, changelogs, comments, and existing worklogs per issue. Performs unified activity detection across all three data sources, then splits each day's free time (target minus already logged) over the new tickets.
+- **`jiraFetcher`**: The Smart Fetch engine. Paginates through JQL results, changelogs, comments, and existing worklogs per issue. Reads all status changes with one bulk changelog call, comments and worklogs for 5 issues at a time (429 → Retry-After retry, no fixed delays), performs unified activity detection across all three data sources, then splits each day's free time (target minus already logged) over the new tickets.
 - **`holidayService`**: Dual-source holiday provider. Routes Indonesia (ID) to libur.deno.dev for complete data (Idul Fitri, Nyepi, Imlek, etc.). All other countries use Nager.at API. Both cached in localStorage for 24h.
 - **`validationEngine`**: Performs real-time regex and date-math checks to ensure 100% Jira compatibility before any API call.
 

@@ -11,18 +11,11 @@ export interface FetchParams {
   defaultTime?: string;
 }
 
-/** Delay helper to avoid hammering Jira API — interruptible by signal */
-const delay = (ms: number, signal?: AbortSignal) => 
-  new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener('abort', () => {
-      clearTimeout(timer);
-      reject(new DOMException('Aborted', 'AbortError'));
-    }, { once: true });
-  });
-
-/** Rate limit: wait this many ms between API calls */
-const THROTTLE_MS = 1000;
+/**
+ * Issues scanned at the same time. A small pool removes most of the waiting on round trips; if Jira still
+ * finds it too much it answers 429, which jiraService retries after Retry-After.
+ */
+const ISSUE_CONCURRENCY = 5;
 
 /** Reads a startAt-paged Jira list to the end; Jira may return fewer items than asked, so trust total. */
 async function readAllPages<T>(
@@ -34,7 +27,6 @@ async function readAllPages<T>(
     const { items, total } = await readPage(all.length);
     all.push(...items);
     if (items.length === 0 || all.length >= (total ?? 0)) break;
-    await delay(THROTTLE_MS, signal);
   }
   return all;
 }
@@ -153,6 +145,7 @@ export const jiraFetcher = {
 
     onProgress?.(0, 1, 'Searching for matching issues...');
     const issueMap = new Map<string, string>(); // key -> summary
+    const keyById = new Map<string, string>(); // bulk changelog answers by issue ID
     const collectIssues = async (query: string) => {
       let nextPageToken: string | undefined;
       while (!signal?.aborted) {
@@ -161,75 +154,63 @@ export const jiraFetcher = {
         for (const issue of issues) {
           const summary = issue.fields?.summary || issue.key;
           issueMap.set(issue.key, summary);
+          if (issue.id) keyById.set(String(issue.id), issue.key);
         }
         if (data.isLast || !data.nextPageToken) break;
         nextPageToken = data.nextPageToken;
-        await delay(THROTTLE_MS, signal);
       }
     };
 
     try {
       await collectIssues(jql);
       // The day budget must see every worklog of the user, also on issues the user's JQL does not match.
-      await delay(THROTTLE_MS, signal);
       await collectIssues(`worklogAuthor = currentUser() AND worklogDate >= "${startDate}" AND worklogDate <= "${endDate}"`);
     } catch (err) {
       if ((err as Error).name !== 'AbortError') throw err;
     }
 
     const allIssueKeys = Array.from(issueMap.keys());
-    const totalSteps = allIssueKeys.length * 3; // changelog + comments + worklogs per issue
-    onProgress?.(0, totalSteps, `Found ${allIssueKeys.length} issues. Scanning history & existing worklogs...`);
+
+    // One bulk call per 1000 issues instead of one changelog call per issue: the per-issue round trips
+    // were most of the scan time.
+    const statusChangesByKey = new Map<string, Array<{ date: string; statusChange: string }>>();
+    for (let from = 0; from < allIssueKeys.length && !signal?.aborted; from += 1000) {
+      const chunk = allIssueKeys.slice(from, from + 1000);
+      let nextPageToken: string | undefined;
+      do {
+        const page = await jiraService.bulkFetchStatusChangelogs(config, chunk, nextPageToken, signal);
+        for (const issueLog of page.issueChangeLogs || []) {
+          const key = keyById.get(String(issueLog.issueId)) || String(issueLog.issueId);
+          for (const history of issueLog.changeHistories || []) {
+            if (history.author?.accountId !== myAccountId) continue;
+            const createdDate = parseISO(history.created);
+            if (!isWithinInterval(createdDate, { start, end })) continue;
+            for (const item of history.items || []) {
+              if (item.field !== 'status') continue;
+              const list = statusChangesByKey.get(key) || [];
+              list.push({ date: format(createdDate, 'yyyy-MM-dd'), statusChange: `${item.fromString || 'None'} → ${item.toString || 'None'}` });
+              statusChangesByKey.set(key, list);
+            }
+          }
+        }
+        nextPageToken = page.nextPageToken || undefined;
+      } while (nextPageToken && !signal?.aborted);
+    }
+    const totalSteps = allIssueKeys.length; // progress counts finished issues
+    let doneIssues = 0;
+    onProgress?.(0, totalSteps, `Found ${allIssueKeys.length} issues. Reading comments and worklogs...`);
 
     // Collect raw events and track existing worklogs
     const rawEvents: RawEvent[] = [];
     const failedIssues: string[] = [];
     const existingWorklogs = new Map<string, { comment: string; seconds: number }>(); // "issueKey::yyyy-MM-dd" -> own worklogs that day
     
-    // For each issue: fetch changelog, then comments, then worklogs
-    for (let i = 0; i < allIssueKeys.length; i++) {
-      if (signal?.aborted) break;
-      const key = allIssueKeys[i];
+    // Comments + worklogs of one issue; ISSUE_CONCURRENCY issues run at the same time.
+    const scanIssue = async (key: string) => {
       const summary = issueMap.get(key) || key;
-      
+
       try {
-        // --- Step 2: Fetch changelog ---
-        onProgress?.(i * 3 + 1, totalSteps, `[${i + 1}/${allIssueKeys.length}] Changelog: ${key}`);
-        
-        const statusChangeDates: Array<{ date: string; statusChange: string }> = [];
-        let changelogStartAt = 0;
-        
-        while (!signal?.aborted) {
-          const historyData = await jiraService.getIssueChangelog(config, key, changelogStartAt, signal);
-          const values = historyData.values || [];
-          
-          for (const history of values) {
-            if (history.author?.accountId !== myAccountId) continue;
-
-            const createdDate = parseISO(history.created);
-            if (!isWithinInterval(createdDate, { start, end })) continue;
-
-            for (const item of history.items) {
-              if (item.field !== 'status') continue;
-
-              const dateKey = format(createdDate, 'yyyy-MM-dd');
-              statusChangeDates.push({
-                date: dateKey,
-                statusChange: `${item.fromString || 'None'} → ${item.toString || 'None'}`,
-              });
-            }
-          }
-
-          if (changelogStartAt + values.length >= (historyData.total ?? 0) || values.length === 0) break;
-          changelogStartAt += values.length;
-          await delay(THROTTLE_MS, signal);
-        }
-
-        if (signal?.aborted) break;
-
-        // --- Step 3: Fetch latest comment for this issue ---
-        onProgress?.(i * 3 + 2, totalSteps, `[${i + 1}/${allIssueKeys.length}] Comments: ${key}`);
-        await delay(THROTTLE_MS, signal);
+        const statusChangeDates = statusChangesByKey.get(key) || [];
 
         // Build a map: date -> latest comment text (by author, on that date)
         const commentsByDate = new Map<string, string>();
@@ -251,10 +232,6 @@ export const jiraFetcher = {
           }
         }
 
-        // --- Step 3b: Fetch existing worklogs for this issue ---
-        onProgress?.(i * 3 + 3, totalSteps, `[${i + 1}/${allIssueKeys.length}] Checking existing worklogs: ${key}`);
-        await delay(THROTTLE_MS, signal);
-        
         const worklogs = await readAllPages<JiraWorklog>(async startAt => {
           const page = await jiraService.getIssueWorklogs(
             config, key, { startAt, startedAfter: start.getTime(), startedBefore: end.getTime() }, signal
@@ -311,12 +288,23 @@ export const jiraFetcher = {
           console.warn(`Error processing ${key}, skipping:`, err);
           failedIssues.push(key);
         } else {
-          break; // Stop processing issues on abort
+          return; // cancelled: no progress update, the workers stop picking new issues
         }
       }
+      doneIssues++;
+      onProgress?.(doneIssues, totalSteps, `${doneIssues} / ${totalSteps} issues`);
+    };
 
-      if (i < allIssueKeys.length - 1 && !signal?.aborted) await delay(THROTTLE_MS, signal);
-    }
+    // A small fixed pool keeps the scan fast without flooding Jira; any 429 is retried in jiraService.
+    let nextIndex = 0;
+    const worker = async () => {
+      while (!signal?.aborted && nextIndex < allIssueKeys.length) {
+        await scanIssue(allIssueKeys[nextIndex++]);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(ISSUE_CONCURRENCY, allIssueKeys.length) }, worker));
+    // Workers finish in any order; keep the list stable for the user.
+    failedIssues.sort();
 
     // Step 4 — Smart Report: merge transitions + distribute time
     const finalMsg = signal?.aborted ? 'Scan stopped. Processing partial results...' : 'Building smart report...';
