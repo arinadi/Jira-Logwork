@@ -22,15 +22,16 @@ export const jiraService = {
   },
 
   /**
-   * Performs a paginated JQL search
+   * Performs a paginated JQL search.
+   * /search/jql has no startAt: pass the nextPageToken of the previous page, until isLast.
    */
-  async searchIssues(config: AuthConfig, jql: string, startAt = 0, signal?: AbortSignal) {
+  async searchIssues(config: AuthConfig, jql: string, nextPageToken?: string, signal?: AbortSignal) {
     const queryParams = new URLSearchParams({
       jql,
       fields: 'key,summary',
-      startAt: String(startAt),
       maxResults: '100',
     });
+    if (nextPageToken) queryParams.set('nextPageToken', nextPageToken);
     const response = await this.apiFetch(config, `/rest/api/3/search/jql?${queryParams.toString()}`, { signal });
     if (!response.ok) {
       const errorText = await response.text();
@@ -49,7 +50,7 @@ export const jiraService = {
   },
 
   /**
-   * Fetches all comments for a specific issue (paginated)
+   * Fetches one page of comments for an issue, newest first
    */
   async getIssueComments(config: AuthConfig, issueKey: string, startAt = 0, signal?: AbortSignal) {
     const response = await this.apiFetch(config, `/rest/api/3/issue/${issueKey}/comment?startAt=${startAt}&maxResults=100&orderBy=-created`, { signal });
@@ -58,10 +59,20 @@ export const jiraService = {
   },
 
   /**
-   * Fetches all worklogs for a specific issue
+   * Fetches one page of worklogs for an issue, started within [startedAfter, startedBefore] (epoch ms)
    */
-  async getIssueWorklogs(config: AuthConfig, issueKey: string, signal?: AbortSignal) {
-    const response = await this.apiFetch(config, `/rest/api/3/issue/${issueKey}/worklog`, { signal });
+  async getIssueWorklogs(
+    config: AuthConfig,
+    issueKey: string,
+    range: { startAt: number; startedAfter: number; startedBefore: number },
+    signal?: AbortSignal
+  ) {
+    const queryParams = new URLSearchParams({
+      startAt: String(range.startAt),
+      startedAfter: String(range.startedAfter),
+      startedBefore: String(range.startedBefore),
+    });
+    const response = await this.apiFetch(config, `/rest/api/3/issue/${issueKey}/worklog?${queryParams.toString()}`, { signal });
     if (!response.ok) throw new Error(`Failed to fetch worklogs for ${issueKey}`);
     return response.json();
   },

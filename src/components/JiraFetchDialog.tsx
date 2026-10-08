@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { X, Search, Calendar, User, Loader2, Download, Table as TableIcon, Zap, RotateCcw } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { X, Search, Calendar, Loader2, Download, Table as TableIcon, Zap, RotateCcw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { jiraService } from '../services/jira';
-import { jiraFetcher, type FetchParams } from '../utils/jiraFetcher';
+import { jiraFetcher, type FetchParams, type ScanResult } from '../utils/jiraFetcher';
+import { defaultScanJql, defaultScanRange } from '../utils/scanDefaults';
 import { csvExporter } from '../utils/csvExporter';
 import type { WorklogEntry } from '../types/worklog';
 
@@ -22,45 +22,26 @@ const labelStyle: React.CSSProperties = {
   color: 'var(--text-subtle)',
 };
 
-const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-const today = new Date().toISOString().split('T')[0];
-
 export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ isOpen, onClose, onImport }) => {
   const { config } = useAuth();
-  const [params, setParams] = useState<FetchParams>({
-    jql: '',
-    startDate: oneWeekAgo,
-    endDate: today,
-    authorName: '',
-    defaultTime: '8h'
+  // Lazy init: the parent mounts this dialog on open, so "today" is the day the dialog is opened.
+  const [params, setParams] = useState<FetchParams>(() => {
+    const range = defaultScanRange(new Date());
+    return { ...range, jql: defaultScanJql(range.startDate, range.endDate), defaultTime: '8h' };
   });
 
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0, message: '' });
-  const [results, setResults] = useState<WorklogEntry[] | null>(null);
+  const [scan, setScan] = useState<ScanResult | null>(null);
+  const results: WorklogEntry[] | null = scan?.entries ?? null;
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Pre-fill user info
-  useEffect(() => {
-    if (isOpen && config && !params.authorName) {
-      jiraService.getCurrentUser(config).then(user => {
-        const name = user.displayName;
-        setParams(prev => ({
-          ...prev,
-          authorName: name,
-          jql: `(assignee = "${name}" OR watcher = "${name}" OR worklogAuthor = "${name}") AND status CHANGED DURING ("${prev.startDate}", "${prev.endDate}")`
-        }));
-      }).catch(console.error);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, config]);
-
-  // Update JQL template when dates or author change
+  // Update JQL template when dates change
   const handleParamChange = (key: keyof FetchParams, value: string) => {
     setParams(prev => {
       const next = { ...prev, [key]: value };
-      if (key === 'startDate' || key === 'endDate' || key === 'authorName') {
-        next.jql = `(assignee = "${next.authorName}" OR watcher = "${next.authorName}" OR worklogAuthor = "${next.authorName}") AND status CHANGED DURING ("${next.startDate}", "${next.endDate}")`;
+      if (key === 'startDate' || key === 'endDate') {
+        next.jql = defaultScanJql(next.startDate, next.endDate);
       }
       return next;
     });
@@ -69,14 +50,14 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ isOpen, onClos
   const handleFetch = async () => {
     if (!config) return;
     setIsLoading(true);
-    setResults(null);
+    setScan(null);
     setProgress({ current: 0, total: 0, message: 'Initializing scan...' });
     
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
     try {
-      const entries = await jiraFetcher.fetchEvents(
+      const scanResult = await jiraFetcher.fetchEvents(
         config, 
         params, 
         (current, total, message) => {
@@ -84,7 +65,7 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ isOpen, onClos
         },
         controller.signal
       );
-      setResults(entries);
+      setScan(scanResult);
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
         alert('Error fetching Jira events. Check your JQL or connection.');
@@ -170,20 +151,6 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ isOpen, onClos
                 </div>
               </div>
               <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-[0.15em] pl-1" style={labelStyle}>Author Name</label>
-                <div className="relative group">
-                  <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-subtle)' }} />
-                  <input
-                    type="text"
-                    className="w-full pl-12 pr-4 py-3.5 border rounded-2xl text-sm font-semibold focus:ring-2 focus:ring-atlassian-blue/20 outline-none transition-all"
-                    style={inputStyle}
-                    value={params.authorName}
-                    onChange={(e) => handleParamChange('authorName', e.target.value)}
-                    placeholder="Full Display Name"
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
                 <label className="text-[10px] font-bold uppercase tracking-[0.15em] pl-1" style={labelStyle}>Default Log Hours</label>
                 <input
                   type="text"
@@ -237,6 +204,16 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ isOpen, onClos
               <div className="space-y-3">
                 <h3 className="text-4xl font-semibold tracking-tight" style={{ color: 'var(--text-main)' }}>{results.length} Entries Discovered</h3>
                 <p className="font-medium text-lg max-w-sm mx-auto" style={{ color: 'var(--text-subtle)', opacity: 0.7 }}>We analyzed your history and generated {results.length} smart worklogs.</p>
+                {scan && scan.failedIssues.length > 0 && (
+                  <p role="alert" className="text-sm font-medium text-red-500 max-w-md mx-auto">
+                    Partial result: could not read {scan.failedIssues.join(', ')}. Their activity is missing.
+                  </p>
+                )}
+                {scan && scan.fullDays.length > 0 && (
+                  <p className="text-sm font-medium max-w-md mx-auto" style={{ color: 'var(--text-subtle)' }}>
+                    Already at target, no new rows: {scan.fullDays.join(', ')}.
+                  </p>
+                )}
               </div>
 
               <div className="flex gap-4 w-full max-w-lg mx-auto">
@@ -284,7 +261,7 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ isOpen, onClos
 
               <div className="pt-2">
                 <button
-                  onClick={() => setResults(null)}
+                  onClick={() => setScan(null)}
                   className="flex items-center gap-2 px-6 py-2.5 rounded-xl font-medium transition-colors hover:bg-black/5 dark:hover:bg-white/5 active:scale-95"
                   style={{ color: 'var(--text-subtle)' }}
                 >

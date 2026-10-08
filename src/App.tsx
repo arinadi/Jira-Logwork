@@ -278,11 +278,14 @@ function AppContent() {
         />
       )}
 
-      <JiraFetchDialog 
-        isOpen={showFetchDialog}
-        onClose={() => setShowFetchDialog(false)}
-        onImport={addEntries}
-      />
+      {/* Mounted only while open, so its date defaults are taken at open time */}
+      {showFetchDialog && (
+        <JiraFetchDialog 
+          isOpen={showFetchDialog}
+          onClose={() => setShowFetchDialog(false)}
+          onImport={addEntries}
+        />
+      )}
     </div>
   );
 }

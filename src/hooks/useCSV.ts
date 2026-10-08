@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { parseISO, addDays, format } from 'date-fns';
 import type { WorklogEntry, FieldMapping } from '../types/worklog';
 import { csvParser } from '../utils/csvParser';
+import { mergeFetchedEntries } from '../utils/mergeEntries';
 
 export const useCSV = () => {
   const [entries, setEntries] = useState<WorklogEntry[]>([]);
@@ -93,7 +94,7 @@ export const useCSV = () => {
   }, []);
 
   const addEntries = useCallback((newEntries: WorklogEntry[]) => {
-    setEntries(prev => [...prev, ...newEntries]);
+    setEntries(prev => mergeFetchedEntries(prev, newEntries));
   }, []);
 
   return {

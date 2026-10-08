@@ -8,8 +8,8 @@
 
 - 🧠 **Smart Fetch Engine** — Scans your Jira issue history (status changes, comments, existing worklogs) and auto-generates time entries. Detects activity across all three data sources per issue.
 - 🔁 **Intelligent Duplicate Prevention** — Cross-references existing Jira worklogs before generating new ones. Already-logged entries are marked as "synced" and locked from re-upload.
-- ⏱️ **Auto Time Distribution** — Distributes your daily target (default 8h) equally across all tickets with activity on the same day. 3 tickets on Monday? Each gets 2h 40m.
-- 💬 **Comment-First Logging** — Uses your latest Jira comment as the worklog description. Falls back to status transitions, then issue summary. Your own words become your log.
+- ⏱️ **Auto Time Distribution** — Splits the hours still free in your daily target (default 8h, minus what you already logged that day) across the new tickets with activity on that day. 3 new tickets on an empty Monday? 2h 40m each, summing to exactly 8h.
+- 💬 **Comment-First Logging** — Uses your own Jira comment from that day as the worklog description. Falls back to your status transitions that day, then the issue summary. Never uses someone else's comment.
 - 📅 **Calendar-Aware Performance Tracker** — Shows all dates in your work range with:
   - 🏛 **Public holiday detection** — Indonesia uses [libur.deno.dev](https://libur.deno.dev) (24 entries including Idul Fitri, Nyepi, Imlek, Idul Adha). Other countries use [Nager.at](https://date.nager.at) API.
   - 📆 **Weekend highlighting** — Saturday/Sunday are dimmed with badges.
@@ -30,16 +30,32 @@
 ### 🧠 Smart Fetch: How Activity Becomes Worklogs
 
 ```
-For each issue matching your JQL:
-  ├── Fetch changelog     → detect status transitions by you in date range
-  ├── Fetch comments      → find your latest comment per date (fallback: global latest)
-  ├── Fetch worklogs      → detect existing entries to prevent duplicates
-  └── Merge all activity dates → one entry per issue per day
+Who is "you": your accountId from /rest/api/3/myself (not your display name).
 
-Then:
-  ├── Group entries by date
-  ├── Distribute daily hours equally (8h ÷ N tickets)
-  └── Mark existing worklogs as "synced" (locked, won't re-upload)
+Find issues:
+  ├── Your JQL, paged with nextPageToken until isLast
+  │     default: worklogAuthor = currentUser() AND worklogDate >= start AND worklogDate <= end
+  │              OR status CHANGED BY currentUser() DURING (start, end + 1 day)
+  │              OR watcher = currentUser() AND updated >= start
+  │     (commenting makes you a watcher by default; Jira Cloud has no "commented by" clause)
+  └── Plus every issue where you logged work in the range (so the day total sees all your worklogs)
+
+For each issue (every page of changelog, comments and worklogs is read):
+  ├── Changelog → your status transitions in the range
+  ├── Comments  → your own comment per day in the range
+  ├── Worklogs  → your worklogs in the range (startedAfter/startedBefore)
+  └── One entry per issue per active day
+
+Then, per day:
+  ├── Issue already has your worklog → "synced" row with the REAL logged time (locked)
+  ├── Free time = daily target − all your logged time that day (on any issue)
+  ├── Free time split over the new tickets in minutes; the parts sum exactly to the free time
+  └── No free time left → no new rows; the day is listed as "full" in the scan result
+
+Text of a new row: your comment that day → your transitions that day → issue summary.
+Issues that fail to load are listed in the scan result; the rest is still returned.
+Date range defaults use your local date when the dialog opens.
+Fetching again replaces unsynced rows with the same issue + day instead of adding duplicates.
 ```
 
 **The motivation is simple:** Be active on your Jira tickets — comment on blockers, move status, discuss with your team — and the IDE will handle the logwork for you. No more double work.
@@ -59,8 +75,8 @@ This application is built as a high-performance, stateless static web app using:
 
 ### ⚙️ Core Logic Modules
 - **`jiraService`**: Handles paginated REST API v3 calls, including ADF (Atlassian Document Format) payload transformation.
-- **`useSync`**: Orchestrates sequential batch uploads with a mandatory **5-second cooldown** between requests to prevent Jira API rate limiting (429 errors).
-- **`jiraFetcher`**: The Smart Fetch engine. Paginates through JQL results, changelogs, comments, and existing worklogs per issue. Performs unified activity detection across all three data sources, then distributes time across tickets proportionally.
+- **`useSync`**: Orchestrates sequential batch uploads with a mandatory **1-second cooldown** between requests to prevent Jira API rate limiting (429 errors).
+- **`jiraFetcher`**: The Smart Fetch engine. Paginates through JQL results, changelogs, comments, and existing worklogs per issue. Performs unified activity detection across all three data sources, then splits each day's free time (target minus already logged) over the new tickets.
 - **`holidayService`**: Dual-source holiday provider. Routes Indonesia (ID) to libur.deno.dev for complete data (Idul Fitri, Nyepi, Imlek, etc.). All other countries use Nager.at API. Both cached in localStorage for 24h.
 - **`validationEngine`**: Performs real-time regex and date-math checks to ensure 100% Jira compatibility before any API call.
 

@@ -8,7 +8,6 @@ export interface FetchParams {
   jql: string;
   startDate: string;
   endDate: string;
-  authorName: string;
   defaultTime?: string;
 }
 
@@ -25,15 +24,38 @@ const delay = (ms: number, signal?: AbortSignal) =>
 /** Rate limit: wait this many ms between API calls */
 const THROTTLE_MS = 1000;
 
-/** Convert decimal hours to Jira time notation (e.g., 2.6667 -> "2h 40m") */
-function hoursToJiraTime(hours: number): string {
-  const h = Math.floor(hours);
-  const m = Math.round((hours - h) * 60);
+/** Reads a startAt-paged Jira list to the end; Jira may return fewer items than asked, so trust total. */
+async function readAllPages<T>(
+  readPage: (startAt: number) => Promise<{ items: T[]; total?: number }>,
+  signal?: AbortSignal
+): Promise<T[]> {
+  const all: T[] = [];
+  while (!signal?.aborted) {
+    const { items, total } = await readPage(all.length);
+    all.push(...items);
+    if (items.length === 0 || all.length >= (total ?? 0)) break;
+    await delay(THROTTLE_MS, signal);
+  }
+  return all;
+}
 
-  if (h === 0 && m === 0) return '1h'; // minimum 1h
+/** Convert whole minutes to Jira time notation (e.g., 160 -> "2h 40m") */
+function minutesToJiraTime(totalMinutes: number): string {
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
   if (m === 0) return `${h}h`;
   if (h === 0) return `${m}m`;
   return `${h}h ${m}m`;
+}
+
+/**
+ * Splits free minutes over n tickets so the parts add up exactly.
+ * Floor + hand the remainder out one minute at a time: rounding each part alone drifts (8h / 7 → 8h 3m).
+ */
+function splitMinutes(freeMinutes: number, n: number): number[] {
+  const base = Math.floor(freeMinutes / n);
+  const remainder = freeMinutes - base * n;
+  return Array.from({ length: n }, (_, i) => base + (i < remainder ? 1 : 0));
 }
 
 /** Extract plain text from Atlassian Document Format (ADF) — first 2 lines only (Optimized for comments) */
@@ -82,6 +104,19 @@ function adfToWorklogText(adf: unknown): string {
   return result.length > 300 ? result.substring(0, 297) + '...' : result;
 }
 
+/** The fields this scanner reads from Jira REST v3 comment and worklog objects. */
+interface JiraAuthor { accountId?: string }
+interface JiraComment { author?: JiraAuthor; created: string; body: unknown }
+interface JiraWorklog { author?: JiraAuthor; started: string; timeSpentSeconds?: number; comment?: unknown }
+
+export interface ScanResult {
+  entries: WorklogEntry[];
+  /** Days that had new activity but no free time left, so no new rows were made. */
+  fullDays: string[];
+  /** Issues whose history could not be read; their activity is missing from entries. */
+  failedIssues: string[];
+}
+
 /** Raw event collected before smart distribution */
 interface RawEvent {
   issueKey: string;
@@ -93,45 +128,51 @@ interface RawEvent {
 
 export const jiraFetcher = {
   /**
-   * Orchestrates the fetching and filtering of status change events.
-   * 
-   * Step 1: GET /rest/api/3/search/jql  → issue keys + summaries
-   * Step 2: GET /rest/api/3/issue/{key}/changelog  → status changes
-   * Step 3: GET /rest/api/3/issue/{key}/comment  → latest comment
-   * 
-   * Smart Report:
-   *   - Deduplicates by issue+date
-   *   - Groups by date, distributes 8h equally across tickets on same day
-   *   - Uses the latest comment as the worklog text (fallback: issue summary)
+   * Turns the user's Jira activity in [startDate, endDate] into worklog rows.
+   * The rules are documented in README.md "Smart Fetch: How Activity Becomes Worklogs".
+   *
+   * Step 1: GET /rest/api/3/myself + /rest/api/3/search/jql (user JQL + own worklogs) → issues
+   * Step 2: per issue, all pages of changelog, comments and worklogs in range
+   * Step 3: per day, synced rows with real time; free time split over new tickets
    */
   async fetchEvents(
     config: AuthConfig, 
     params: FetchParams, 
     onProgress?: (current: number, total: number, message: string) => void,
     signal?: AbortSignal
-  ): Promise<WorklogEntry[]> {
-    const { jql, startDate, endDate, authorName, defaultTime = '8h' } = params;
+  ): Promise<ScanResult> {
+    const { jql, startDate, endDate, defaultTime = '8h' } = params;
     const start = parseISO(startDate);
     // End date must include the full day — shift to next midnight so isWithinInterval is inclusive
     const end = addDays(parseISO(endDate), 1);
     
     // Step 1 — Fetch all issue keys + summaries
+    // Match activity by accountId: display names are not unique and can change.
+    const me = await jiraService.getCurrentUser(config, signal);
+    const myAccountId: string = me.accountId;
+
     onProgress?.(0, 1, 'Searching for matching issues...');
     const issueMap = new Map<string, string>(); // key -> summary
-    let searchStartAt = 0;
-    
-    try {
+    const collectIssues = async (query: string) => {
+      let nextPageToken: string | undefined;
       while (!signal?.aborted) {
-        const data = await jiraService.searchIssues(config, jql, searchStartAt, signal);
+        const data = await jiraService.searchIssues(config, query, nextPageToken, signal);
         const issues = data.issues || [];
         for (const issue of issues) {
           const summary = issue.fields?.summary || issue.key;
           issueMap.set(issue.key, summary);
         }
-        if (data.isLast || issues.length === 0) break;
-        searchStartAt += issues.length;
+        if (data.isLast || !data.nextPageToken) break;
+        nextPageToken = data.nextPageToken;
         await delay(THROTTLE_MS, signal);
       }
+    };
+
+    try {
+      await collectIssues(jql);
+      // The day budget must see every worklog of the user, also on issues the user's JQL does not match.
+      await delay(THROTTLE_MS, signal);
+      await collectIssues(`worklogAuthor = currentUser() AND worklogDate >= "${startDate}" AND worklogDate <= "${endDate}"`);
     } catch (err) {
       if ((err as Error).name !== 'AbortError') throw err;
     }
@@ -142,7 +183,8 @@ export const jiraFetcher = {
 
     // Collect raw events and track existing worklogs
     const rawEvents: RawEvent[] = [];
-    const existingWorklogs = new Map<string, string>(); // Tracks "issueKey::yyyy-MM-dd" -> comment
+    const failedIssues: string[] = [];
+    const existingWorklogs = new Map<string, { comment: string; seconds: number }>(); // "issueKey::yyyy-MM-dd" -> own worklogs that day
     
     // For each issue: fetch changelog, then comments, then worklogs
     for (let i = 0; i < allIssueKeys.length; i++) {
@@ -162,8 +204,7 @@ export const jiraFetcher = {
           const values = historyData.values || [];
           
           for (const history of values) {
-            const author = (history.author || {}).displayName || '';
-            if (author !== authorName) continue;
+            if (history.author?.accountId !== myAccountId) continue;
 
             const createdDate = parseISO(history.created);
             if (!isWithinInterval(createdDate, { start, end })) continue;
@@ -192,44 +233,38 @@ export const jiraFetcher = {
 
         // Build a map: date -> latest comment text (by author, on that date)
         const commentsByDate = new Map<string, string>();
-        let globalLatestComment = '';
-        const commentsData = await jiraService.getIssueComments(config, key, 0, signal);
-        const comments = commentsData.comments || []; // ordered -created (newest first)
-        
+        const comments = await readAllPages<JiraComment>(async startAt => {
+          const page = await jiraService.getIssueComments(config, key, startAt, signal);
+          return { items: page.comments || [], total: page.total };
+        }, signal);
+
         for (const c of comments) {
-          const cAuthor = (c.author || {}).displayName || '';
+          const isMine = c.author?.accountId === myAccountId;
           const cDate = parseISO(c.created);
           const cDateKey = format(cDate, 'yyyy-MM-dd');
           const text = adfToPlainText(c.body);
           if (!text) continue;
 
-          // Track the globally latest comment by the author
-          if (cAuthor === authorName && !globalLatestComment) {
-            globalLatestComment = text;
-          }
-
           // For each date within range, keep the latest comment
-          if (cAuthor === authorName && isWithinInterval(cDate, { start, end }) && !commentsByDate.has(cDateKey)) {
+          if (isMine && isWithinInterval(cDate, { start, end }) && !commentsByDate.has(cDateKey)) {
             commentsByDate.set(cDateKey, text);
           }
-        }
-
-        // Fallback: use the latest comment by anyone
-        if (!globalLatestComment && comments.length > 0) {
-          globalLatestComment = adfToPlainText(comments[0].body);
         }
 
         // --- Step 3b: Fetch existing worklogs for this issue ---
         onProgress?.(i * 3 + 3, totalSteps, `[${i + 1}/${allIssueKeys.length}] Checking existing worklogs: ${key}`);
         await delay(THROTTLE_MS, signal);
         
-        const worklogsData = await jiraService.getIssueWorklogs(config, key, signal);
-        const worklogs = worklogsData.worklogs || [];
+        const worklogs = await readAllPages<JiraWorklog>(async startAt => {
+          const page = await jiraService.getIssueWorklogs(
+            config, key, { startAt, startedAfter: start.getTime(), startedBefore: end.getTime() }, signal
+          );
+          return { items: page.worklogs || [], total: page.total };
+        }, signal);
         const worklogDates = new Set<string>();
         
         for (const w of worklogs) {
-          const wAuthor = (w.author || {}).displayName || '';
-          if (wAuthor !== authorName) continue;
+          if (w.author?.accountId !== myAccountId) continue;
           
           const wDate = parseISO(w.started);
           if (!isWithinInterval(wDate, { start, end })) continue;
@@ -237,7 +272,11 @@ export const jiraFetcher = {
           const wDateKey = format(wDate, 'yyyy-MM-dd');
           const wComment = w.comment ? adfToWorklogText(w.comment) : '';
           
-          existingWorklogs.set(`${key}::${wDateKey}`, wComment);
+          const logged = existingWorklogs.get(`${key}::${wDateKey}`);
+          existingWorklogs.set(`${key}::${wDateKey}`, {
+            comment: logged?.comment || wComment,
+            seconds: (logged?.seconds || 0) + (w.timeSpentSeconds || 0),
+          });
           worklogDates.add(wDateKey);
         }
 
@@ -250,7 +289,8 @@ export const jiraFetcher = {
 
         // Build raw events for each active date
         for (const date of allActivityDates) {
-          const dateComment = commentsByDate.get(date) || globalLatestComment || summary;
+          // Only the user's own words from that day describe that day's work; others' comments do not.
+          const dateComment = commentsByDate.get(date) || '';
           
           // Find all transitions for this specific date
           const transitions = statusChangeDates
@@ -267,7 +307,9 @@ export const jiraFetcher = {
         }
       } catch (err) {
         if ((err as Error).name !== 'AbortError') {
+          // Keep scanning the other issues, but the user must see this issue is missing from the result.
           console.warn(`Error processing ${key}, skipping:`, err);
+          failedIssues.push(key);
         } else {
           break; // Stop processing issues on abort
         }
@@ -283,7 +325,7 @@ export const jiraFetcher = {
     const dailyHours = parseDurationToHours(defaultTime) || 8;
 
     // 4a. Group by issueKey+date → merge all transitions into one entry
-    const merged = new Map<string, { issueKey: string; date: string; comment: string; transitions: string[] }>();
+    const merged = new Map<string, { issueKey: string; date: string; summary: string; comment: string; transitions: string[] }>();
     for (const ev of rawEvents) {
       const mergeKey = `${ev.issueKey}::${ev.date}`;
       const existing = merged.get(mergeKey);
@@ -296,6 +338,7 @@ export const jiraFetcher = {
         merged.set(mergeKey, {
           issueKey: ev.issueKey,
           date: ev.date,
+          summary: ev.summary,
           comment: ev.comment,
           transitions: ev.statusChange ? [ev.statusChange] : [],
         });
@@ -303,7 +346,7 @@ export const jiraFetcher = {
     }
 
     // 4b. Group merged entries by date for time distribution
-    const byDate = new Map<string, Array<{ issueKey: string; date: string; comment: string; transitions: string[] }>>();
+    const byDate = new Map<string, Array<{ issueKey: string; date: string; summary: string; comment: string; transitions: string[] }>>();
     for (const entry of merged.values()) {
       const list = byDate.get(entry.date) || [];
       list.push(entry);
@@ -312,34 +355,46 @@ export const jiraFetcher = {
 
     // 4c. Build final entries with distributed time + combined comment
     const entries: WorklogEntry[] = [];
+    const fullDays: string[] = [];
     for (const [date, ticketsOnDay] of byDate) {
-      const hoursPerTicket = dailyHours / ticketsOnDay.length;
-      const timeSpent = hoursToJiraTime(hoursPerTicket);
+      // Only the time not yet logged that day (on any issue) is free to hand out.
+      let loggedSecondsOnDay = 0;
+      for (const [k, logged] of existingWorklogs) {
+        if (k.endsWith(`::${date}`)) loggedSecondsOnDay += logged.seconds;
+      }
+      const newTickets = ticketsOnDay
+        .filter(t => !existingWorklogs.has(`${t.issueKey}::${date}`))
+        .map(t => t.issueKey)
+        .sort();
+      // Floor to whole minutes: Jira takes minutes, and rounding up could push the day over target.
+      const freeMinutes = Math.max(0, Math.floor((dailyHours * 3600 - loggedSecondsOnDay) / 60));
+      if (newTickets.length > 0 && freeMinutes === 0) fullDays.push(date);
+      const parts = splitMinutes(freeMinutes, newTickets.length || 1);
+      const newMinutes = new Map(newTickets.map((k, i) => [k, parts[i]]));
 
       for (const ticket of ticketsOnDay) {
         const existingKey = `${ticket.issueKey}::${date}`;
-        const existingWorklogComment = existingWorklogs.get(existingKey);
-        const hasExistingWorklog = existingWorklogComment !== undefined;
+        const logged = existingWorklogs.get(existingKey);
+        const hasExistingWorklog = logged !== undefined;
+        // No free minute for this ticket: a new row would push the day over target, and Jira rejects 0m.
+        if (!hasExistingWorklog && !newMinutes.get(ticket.issueKey)) continue;
+        const existingWorklogComment = logged?.comment;
 
-        let finalComment = '';
-        if (hasExistingWorklog) {
-          // Priority: If worklog exists, use its comment (even if empty string)
-          // But if it's completely empty, we can use the ticket's latest comment as a better fallback
-          finalComment = existingWorklogComment || ticket.comment;
-        } else {
-          // Build generated comment: [comment text] | Status: A → B, B → C
-          const transitionText = ticket.transitions.join(', ');
-          const commentParts = [];
-          if (ticket.comment) commentParts.push(ticket.comment);
-          if (transitionText) commentParts.push(`Status: ${transitionText}`);
-          finalComment = commentParts.join(' | ');
-        }
+        // Generated text: [own comment that day] | Status: A → B, B → C — else the issue summary.
+        const transitionText = ticket.transitions.join(', ');
+        const commentParts = [];
+        if (ticket.comment) commentParts.push(ticket.comment);
+        if (transitionText) commentParts.push(`Status: ${transitionText}`);
+        const generatedComment = commentParts.join(' | ') || ticket.summary;
+        // A synced row shows what is in Jira; generated text only fills an empty worklog comment.
+        const finalComment = hasExistingWorklog ? existingWorklogComment || generatedComment : generatedComment;
 
         entries.push({
           id: crypto.randomUUID(),
           issueKey: ticket.issueKey,
           date,
-          timeSpent,
+          // A synced row mirrors what is in Jira; showing the generated split would misstate the day total.
+          timeSpent: logged ? minutesToJiraTime(Math.round(logged.seconds / 60)) : minutesToJiraTime(newMinutes.get(ticket.issueKey) || 0),
           comment: finalComment,
           status: hasExistingWorklog ? 'synced' : 'ready',
           originalRowIndex: entries.length,
@@ -351,7 +406,8 @@ export const jiraFetcher = {
     entries.sort((a, b) => a.date.localeCompare(b.date) || a.issueKey.localeCompare(b.issueKey));
 
     onProgress?.(totalSteps, totalSteps, `Done! ${entries.length} worklogs across ${byDate.size} days.`);
-    return entries;
+    fullDays.sort();
+    return { entries, fullDays, failedIssues };
   }
 };
 

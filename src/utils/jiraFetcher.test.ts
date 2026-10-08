@@ -1,0 +1,280 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { jiraFetcher } from './jiraFetcher';
+import type { AuthConfig } from '../types/auth';
+
+const config: AuthConfig = { domain: 'acme.atlassian.net', email: 'me@acme.test', apiToken: 'token' };
+const ME = { accountId: 'acc-me', displayName: 'Same Name' };
+const OTHER = { accountId: 'acc-other', displayName: 'Same Name' };
+
+interface FakeComment { author: typeof ME; created: string; text: string }
+interface FakeWorklog { author: typeof ME; started: string; timeSpentSeconds: number; text?: string }
+interface FakeHistory { author: typeof ME; created: string; from: string; to: string }
+interface FakeIssue {
+  key: string;
+  summary?: string;
+  histories?: FakeHistory[];
+  comments?: FakeComment[];
+  worklogs?: FakeWorklog[];
+  fail?: boolean;
+}
+
+interface FakeJiraOptions {
+  issues: FakeIssue[];
+  /** Which issue keys a JQL string returns. Default: all issues. */
+  searchByJql?: (jql: string) => string[];
+  /** Real Jira may return fewer items than maxResults; force small pages to exercise paging. */
+  pageSize?: number;
+}
+
+const adf = (text: string) => ({ type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] });
+
+/** Stands in for the Jira Cloud REST API v3 behind the /api/jira proxy. */
+function fakeJira({ issues, searchByJql = () => issues.map(i => i.key), pageSize = 2 }: FakeJiraOptions) {
+  const calls: string[] = [];
+  const byKey = new Map(issues.map(i => [i.key, i]));
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+
+  const handler = async (input: string | URL | Request) => {
+    const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    const url = new URL(raw, 'http://localhost');
+    const path = url.pathname.replace(/^\/api\/jira/, '');
+    calls.push(path + url.search);
+    if (calls.length > 500) throw new Error('fakeJira: too many calls (endless paging?)');
+
+    if (path === '/rest/api/3/myself') return json(ME);
+
+    if (path === '/rest/api/3/search/jql') {
+      // The enhanced search pages only by nextPageToken; startAt is not a parameter of this endpoint.
+      const keys = searchByJql(url.searchParams.get('jql') || '');
+      const offset = Number(url.searchParams.get('nextPageToken') || '0');
+      const page = keys.slice(offset, offset + pageSize);
+      const next = offset + pageSize;
+      const isLast = next >= keys.length;
+      return json({
+        issues: page.map(k => ({ key: k, fields: { summary: byKey.get(k)?.summary || `Summary ${k}` } })),
+        isLast,
+        ...(isLast ? {} : { nextPageToken: String(next) }),
+      });
+    }
+
+    const m = path.match(/^\/rest\/api\/3\/issue\/([^/]+)\/(changelog|comment|worklog)$/);
+    if (m) {
+      const issue = byKey.get(m[1]);
+      if (!issue) return json({ errorMessages: ['Issue does not exist'] }, 404);
+      if (issue.fail) return json({ errorMessages: ['Rate limited'] }, 429);
+      const startAt = Number(url.searchParams.get('startAt') || '0');
+
+      if (m[2] === 'changelog') {
+        const all = (issue.histories || []).map((h, i) => ({
+          id: String(i), author: h.author, created: h.created,
+          items: [{ field: 'status', fromString: h.from, toString: h.to }],
+        }));
+        const values = all.slice(startAt, startAt + pageSize);
+        return json({ values, startAt, maxResults: pageSize, total: all.length, isLast: startAt + pageSize >= all.length });
+      }
+
+      if (m[2] === 'comment') {
+        const all = [...(issue.comments || [])]
+          .sort((a, b) => b.created.localeCompare(a.created))
+          .map((c, i) => ({ id: String(i), author: c.author, created: c.created, body: adf(c.text) }));
+        const comments = all.slice(startAt, startAt + pageSize);
+        return json({ comments, startAt, maxResults: pageSize, total: all.length });
+      }
+
+      const after = url.searchParams.get('startedAfter');
+      const before = url.searchParams.get('startedBefore');
+      const all = (issue.worklogs || [])
+        .filter(w => (!after || Date.parse(w.started) >= Number(after)) && (!before || Date.parse(w.started) <= Number(before)))
+        .map((w, i) => ({
+          id: String(i), author: w.author, started: w.started, timeSpentSeconds: w.timeSpentSeconds,
+          comment: w.text ? adf(w.text) : undefined,
+        }));
+      const worklogs = all.slice(startAt, startAt + pageSize);
+      return json({ worklogs, startAt, maxResults: pageSize, total: all.length });
+    }
+
+    return json({ errorMessages: [`fakeJira: no route for ${path}`] }, 404);
+  };
+
+  vi.stubGlobal('fetch', vi.fn(handler));
+  return { calls };
+}
+
+/** Runs a scan to the end while fake timers skip the throttle delays. */
+async function scan(params: { jql?: string; startDate: string; endDate: string; defaultTime?: string }) {
+  const pending = jiraFetcher.fetchEvents(config, { jql: params.jql ?? 'project = A', ...params });
+  await vi.runAllTimersAsync();
+  return pending;
+}
+
+beforeEach(() => { vi.useFakeTimers(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+describe('jiraFetcher.fetchEvents', () => {
+  it('reads every search page by nextPageToken until isLast', async () => {
+    const keys = ['A-1', 'A-2', 'A-3', 'A-4', 'A-5'];
+    fakeJira({
+      issues: keys.map(key => ({
+        key,
+        comments: [{ author: ME, created: '2026-10-06T10:00:00.000+0700', text: `work on ${key}` }],
+      })),
+    });
+
+    const result = await scan({ startDate: '2026-10-06', endDate: '2026-10-06' });
+
+    expect(result.entries.map(e => e.issueKey).sort()).toEqual(keys);
+  });
+
+  it('ignores activity of another user with the same display name', async () => {
+    fakeJira({
+      issues: [{
+        key: 'A-1',
+        histories: [{ author: OTHER, created: '2026-10-06T10:00:00.000+0700', from: 'Open', to: 'Done' }],
+        comments: [{ author: OTHER, created: '2026-10-06T11:00:00.000+0700', text: 'not mine' }],
+        worklogs: [{ author: OTHER, started: '2026-10-06T09:00:00.000+0700', timeSpentSeconds: 3600 }],
+      }],
+    });
+
+    const result = await scan({ startDate: '2026-10-06', endDate: '2026-10-06' });
+
+    expect(result.entries).toEqual([]);
+  });
+
+  it('shows the real logged time on synced rows, also for worklogs on issues outside the JQL', async () => {
+    fakeJira({
+      issues: [
+        { key: 'A-1', worklogs: [{ author: ME, started: '2026-10-06T09:00:00.000+0700', timeSpentSeconds: 2 * 3600 }] },
+        { key: 'B-9', worklogs: [{ author: ME, started: '2026-10-06T13:00:00.000+0700', timeSpentSeconds: 5 * 3600 + 30 * 60 }] },
+      ],
+      searchByJql: jql => (jql.includes('worklogAuthor = currentUser()') ? ['B-9'] : ['A-1']),
+    });
+
+    const result = await scan({ jql: 'project = A', startDate: '2026-10-06', endDate: '2026-10-06' });
+
+    const rows = result.entries.map(e => ({ issueKey: e.issueKey, timeSpent: e.timeSpent, status: e.status }));
+    expect(rows).toEqual([
+      { issueKey: 'A-1', timeSpent: '2h', status: 'synced' },
+      { issueKey: 'B-9', timeSpent: '5h 30m', status: 'synced' },
+    ]);
+  });
+
+  it('splits only the free time of the day over new tickets, and reports full days', async () => {
+    fakeJira({
+      issues: [
+        { key: 'A-1', worklogs: [
+          { author: ME, started: '2026-10-06T09:00:00.000+0700', timeSpentSeconds: 6 * 3600 },
+          { author: ME, started: '2026-10-07T09:00:00.000+0700', timeSpentSeconds: 8 * 3600 },
+        ] },
+        { key: 'A-2', comments: [
+          { author: ME, created: '2026-10-06T10:00:00.000+0700', text: 'review' },
+          { author: ME, created: '2026-10-07T10:00:00.000+0700', text: 'more review' },
+        ] },
+        { key: 'A-3', comments: [{ author: ME, created: '2026-10-06T11:00:00.000+0700', text: 'fix' }] },
+      ],
+    });
+
+    const result = await scan({ startDate: '2026-10-06', endDate: '2026-10-07', defaultTime: '8h' });
+
+    const ready = result.entries.filter(e => e.status === 'ready').map(e => [e.date, e.issueKey, e.timeSpent]);
+    expect(ready).toEqual([
+      ['2026-10-06', 'A-2', '1h'],
+      ['2026-10-06', 'A-3', '1h'],
+    ]);
+    expect(result.fullDays).toEqual(['2026-10-07']);
+  });
+
+  it('makes the new rows of a day add up exactly to the free minutes', async () => {
+    const keys = ['A-1', 'A-2', 'A-3', 'A-4', 'A-5', 'A-6', 'A-7'];
+    fakeJira({
+      issues: [
+        ...keys.map(key => ({ key, comments: [{ author: ME, created: '2026-10-06T10:00:00.000+0700', text: key }] })),
+        // 5h 0m 30s already logged on the 7th leaves 2h 59m 30s free.
+        { key: 'B-1', worklogs: [{ author: ME, started: '2026-10-07T09:00:00.000+0700', timeSpentSeconds: 5 * 3600 + 30 }] },
+        { key: 'B-2', comments: [{ author: ME, created: '2026-10-07T10:00:00.000+0700', text: 'b2' }] },
+      ],
+    });
+
+    const result = await scan({ startDate: '2026-10-06', endDate: '2026-10-07', defaultTime: '8h' });
+
+    const minutes = (t: string) => {
+      const m = t.match(/^(?:(\d+)h)?\s*(?:(\d+)m)?$/);
+      if (!m || Number(m[2] || 0) >= 60) throw new Error(`not a Jira duration: ${t}`);
+      return Number(m[1] || 0) * 60 + Number(m[2] || 0);
+    };
+    const ready = result.entries.filter(e => e.status === 'ready');
+    const day6 = ready.filter(e => e.date === '2026-10-06').map(e => minutes(e.timeSpent));
+    expect(day6).toHaveLength(7);
+    expect(day6.reduce((a, b) => a + b, 0)).toBe(8 * 60);
+    expect(Math.max(...day6) - Math.min(...day6)).toBeLessThanOrEqual(1);
+    expect(ready.filter(e => e.date === '2026-10-07').map(e => e.timeSpent)).toEqual(['2h 59m']);
+  });
+
+  it('writes the row text from own comment that day, then own transitions, then the summary', async () => {
+    fakeJira({
+      issues: [
+        { key: 'A-1', comments: [{ author: ME, created: '2026-10-06T10:00:00.000+0700', text: 'did X' }] },
+        { key: 'A-2',
+          histories: [{ author: ME, created: '2026-10-06T10:00:00.000+0700', from: 'Open', to: 'In Progress' }],
+          comments: [
+            { author: OTHER, created: '2026-10-06T12:00:00.000+0700', text: 'someone else' },
+            { author: ME, created: '2026-10-01T12:00:00.000+0700', text: 'old own comment' },
+          ] },
+        { key: 'A-3', summary: 'Fix login',
+          worklogs: [{ author: ME, started: '2026-10-06T09:00:00.000+0700', timeSpentSeconds: 3600 }],
+          comments: [{ author: OTHER, created: '2026-10-06T12:00:00.000+0700', text: 'someone else' }] },
+      ],
+    });
+
+    const result = await scan({ startDate: '2026-10-06', endDate: '2026-10-06' });
+
+    expect(result.entries.map(e => [e.issueKey, e.comment])).toEqual([
+      ['A-1', 'did X'],
+      ['A-2', 'Status: Open → In Progress'],
+      ['A-3', 'Fix login'],
+    ]);
+  });
+
+  it('reads every page of comments and worklogs, asking only for worklogs in the range', async () => {
+    const othersLater = [1, 2, 3, 4].map(h => ({ author: OTHER, created: `2026-10-07T0${h}:00:00.000+0700`, text: 'later' }));
+    const { calls } = fakeJira({
+      issues: [
+        { key: 'A-1', comments: [...othersLater, { author: ME, created: '2026-10-06T10:00:00.000+0700', text: 'mine' }] },
+        { key: 'A-2', worklogs: [
+          { author: OTHER, started: '2026-10-06T08:00:00.000+0700', timeSpentSeconds: 600 },
+          { author: OTHER, started: '2026-10-06T08:10:00.000+0700', timeSpentSeconds: 600 },
+          { author: OTHER, started: '2026-10-06T08:20:00.000+0700', timeSpentSeconds: 600 },
+          { author: ME, started: '2026-10-06T09:00:00.000+0700', timeSpentSeconds: 3600 },
+        ] },
+      ],
+    });
+
+    const result = await scan({ startDate: '2026-10-06', endDate: '2026-10-06' });
+
+    expect(result.entries.map(e => [e.issueKey, e.status, e.comment])).toEqual([
+      ['A-1', 'ready', 'mine'],
+      ['A-2', 'synced', 'Summary A-2'],
+    ]);
+    const worklogCalls = calls.filter(c => c.includes('/worklog'));
+    expect(worklogCalls.length).toBeGreaterThan(0);
+    for (const c of worklogCalls) {
+      const q = new URLSearchParams(c.split('?')[1]);
+      expect(Number(q.get('startedAfter'))).toBe(Date.parse('2026-10-06T00:00:00+07:00'));
+      expect(Number(q.get('startedBefore'))).toBe(Date.parse('2026-10-07T00:00:00+07:00'));
+    }
+  });
+
+  it('lists issues that failed to load and still returns the rest', async () => {
+    fakeJira({
+      issues: [
+        { key: 'A-1', fail: true },
+        { key: 'A-2', comments: [{ author: ME, created: '2026-10-06T10:00:00.000+0700', text: 'ok' }] },
+      ],
+    });
+
+    const result = await scan({ startDate: '2026-10-06', endDate: '2026-10-06' });
+
+    expect(result.failedIssues).toEqual(['A-1']);
+    expect(result.entries.map(e => e.issueKey)).toEqual(['A-2']);
+  });
+});
