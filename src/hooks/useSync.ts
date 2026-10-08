@@ -1,16 +1,23 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { jiraService } from '../services/jira';
 import type { WorklogEntry } from '../types/worklog';
 import { validateEntry } from '../utils/validation';
+import { createComponentGuard } from '../services/componentGuard';
 
 export const useSync = (
   entries: WorklogEntry[],
-  onUpdateEntry: (id: string, updates: Partial<WorklogEntry>) => void
+  onUpdateEntry: (id: string, updates: Partial<WorklogEntry>) => void,
+  allowedComponents: string[] = []
 ) => {
   const { config } = useAuth();
   const [isSyncing, setIsSyncing] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
+  // One guard per settings change: it caches each issue's components, so a batch asks Jira once per issue.
+  const checkComponents = useMemo(
+    () => (config ? createComponentGuard(config, allowedComponents) : null),
+    [config, allowedComponents]
+  );
 
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -25,6 +32,23 @@ export const useSync = (
     }
 
     onUpdateEntry(entry.id, { status: 'syncing', errorMessage: undefined });
+
+    try {
+      if (checkComponents) {
+        const check = await checkComponents(entry.issueKey);
+        if (!check.allowed) {
+          // Nothing is posted: a worklog on another team's component is the mistake this rule prevents.
+          onUpdateEntry(entry.id, {
+            status: 'error',
+            errorMessage: `Not in ${allowedComponents.join(' / ')} (issue has: ${check.components.join(', ') || 'no component'}).`,
+          });
+          return false;
+        }
+      }
+    } catch (err) {
+      onUpdateEntry(entry.id, { status: 'failed', errorMessage: `Could not check the issue's components: ${(err as Error).message}` });
+      return false;
+    }
 
     try {
       const response = await jiraService.addWorklog(config, entry.issueKey, {
@@ -46,7 +70,7 @@ export const useSync = (
       onUpdateEntry(entry.id, { status: 'failed', errorMessage: 'Network error or CORS issue.' });
       return false;
     }
-  }, [config, onUpdateEntry]);
+  }, [config, onUpdateEntry, checkComponents, allowedComponents]);
 
   const syncAllValid = useCallback(async () => {
     const readyEntries = entries.filter(e => e.status === 'ready' && Object.keys(validateEntry(e)).length === 0);

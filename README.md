@@ -15,6 +15,7 @@
   - 🏛 **Off** — weekend or public holiday; any work logged there counts as overtime. Indonesia uses [libur.deno.dev](https://libur.deno.dev) (Idul Fitri, Nyepi, Imlek, Idul Adha, …), other countries [Nager.at](https://date.nager.at).
   - 🟢 **Today** — today's group is marked.
   - A summary bar on top shows logged vs. target × working days for the whole range.
+- 🧩 **Allowed Components** — In Settings, list the Jira components you may log on (e.g. `DES-Systems, Anoman`; empty = all, case-insensitive). The scan makes new rows only for issues with one of them and lists the others as "outside allowed components"; Sync reads the issue's components first and refuses a row on any other issue, so nothing wrong reaches Jira. Time already logged elsewhere still counts toward the day.
 - 🎯 **Daily Target Setting** — One target (default `8h`) in Settings, used by the scan, the day headers and the summary.
 - 📋 **Copy Row to Days** — Copy a row to several chosen days; days where that issue already has a row are skipped.
 - 💾 **Nothing Lost on Reload** — The workspace is saved in this browser on every change and restored on open. A row that was mid-sync at reload comes back as failed with "check Jira before retry", because it may already be posted.
@@ -41,7 +42,9 @@ Find issues:
   │              OR status CHANGED BY currentUser() DURING (start, end + 1 day)
   │              OR watcher = currentUser() AND updated >= start
   │     (commenting makes you a watcher by default; Jira Cloud has no "commented by" clause)
-  └── Plus every issue where you logged work in the range (so the day total sees all your worklogs)
+  ├── Plus every issue where you logged work in the range (so the day total sees all your worklogs)
+  └── With allowed components set, the activity part of the default JQL adds `AND component in (...)`;
+      the code still drops new rows on any issue without an allowed component (also for an edited JQL)
 
 Status changes of ALL found issues in one go:
   └── POST /changelog/bulkfetch (up to 1000 issues per call, status field only) → your transitions in the range

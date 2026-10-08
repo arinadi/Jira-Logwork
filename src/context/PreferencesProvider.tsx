@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { loadDailyTarget, saveDailyTarget } from '../utils/preferences';
+import { loadAllowedComponents, loadDailyTarget, saveAllowedComponents, saveDailyTarget } from '../utils/preferences';
 import { parseDurationToHours } from '../utils/validation';
 import { getSavedCountry, saveCountry } from '../services/holidays';
 import { PreferencesContext } from './preferencesContext';
@@ -9,6 +9,13 @@ export const PreferencesProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [dailyTarget, setTarget] = useState(() => loadDailyTarget(localStorage));
   // Held in state (not only storage) so the day headers refetch holidays as soon as the country changes.
   const [holidayCountry, setCountry] = useState(getSavedCountry);
+
+  const [allowedComponents, setComponents] = useState(() => loadAllowedComponents(localStorage));
+
+  const setAllowedComponents = useCallback((text: string) => {
+    saveAllowedComponents(localStorage, text);
+    setComponents(loadAllowedComponents(localStorage));
+  }, []);
 
   const setHolidayCountry = useCallback((countryCode: string) => {
     saveCountry(countryCode);
@@ -27,7 +34,9 @@ export const PreferencesProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setDailyTarget,
     holidayCountry,
     setHolidayCountry,
-  }), [dailyTarget, setDailyTarget, holidayCountry, setHolidayCountry]);
+    allowedComponents,
+    setAllowedComponents,
+  }), [dailyTarget, setDailyTarget, holidayCountry, setHolidayCountry, allowedComponents, setAllowedComponents]);
 
   return <PreferencesContext.Provider value={value}>{children}</PreferencesContext.Provider>;
 };

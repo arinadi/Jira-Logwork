@@ -34,3 +34,27 @@ export function loadTheme(storage: Storage, systemPrefersDark: boolean): Theme {
 export function saveTheme(storage: Storage, theme: Theme): void {
   storage.setItem(THEME_STORAGE_KEY, theme);
 }
+
+export const COMPONENTS_STORAGE_KEY = 'jira_logwork_components';
+
+/** "DES-Systems, Anoman" → ['DES-Systems', 'Anoman']. Jira compares component names case-insensitively, so do we. */
+export function parseAllowedComponents(text: string): string[] {
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const part of text.split(',')) {
+    const name = part.trim();
+    if (!name || seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    names.push(name);
+  }
+  return names;
+}
+
+/** Empty list = every component is allowed (no rule set). */
+export function loadAllowedComponents(storage: Storage): string[] {
+  return parseAllowedComponents(storage.getItem(COMPONENTS_STORAGE_KEY) || '');
+}
+
+export function saveAllowedComponents(storage: Storage, text: string): void {
+  storage.setItem(COMPONENTS_STORAGE_KEY, parseAllowedComponents(text).join(', '));
+}

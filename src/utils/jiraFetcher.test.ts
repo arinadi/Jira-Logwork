@@ -16,6 +16,8 @@ interface FakeIssue {
   comments?: FakeComment[];
   worklogs?: FakeWorklog[];
   fail?: boolean;
+  /** Component names, as returned in search fields */
+  components?: string[];
   /** The first comments call answers 429 with this Retry-After (seconds); later calls succeed. */
   rateLimitOnceSeconds?: number;
 }
@@ -74,7 +76,10 @@ function fakeJira({ issues, searchByJql = () => issues.map(i => i.key), pageSize
       const next = offset + pageSize;
       const isLast = next >= keys.length;
       return json({
-        issues: page.map(k => ({ id: idOf(k), key: k, fields: { summary: byKey.get(k)?.summary || `Summary ${k}` } })),
+        issues: page.map(k => ({ id: idOf(k), key: k, fields: {
+          summary: byKey.get(k)?.summary || `Summary ${k}`,
+          components: (byKey.get(k)?.components || []).map((name, n) => ({ id: String(n), name })),
+        } })),
         isLast,
         ...(isLast ? {} : { nextPageToken: String(next) }),
       });
@@ -149,7 +154,7 @@ function fakeJira({ issues, searchByJql = () => issues.map(i => i.key), pageSize
 }
 
 /** Runs a scan to the end while fake timers skip the throttle delays. */
-async function scan(params: { jql?: string; startDate: string; endDate: string; defaultTime?: string }) {
+async function scan(params: { jql?: string; startDate: string; endDate: string; defaultTime?: string; allowedComponents?: string[] }) {
   const pending = jiraFetcher.fetchEvents(config, { jql: params.jql ?? 'project = A', ...params });
   await vi.runAllTimersAsync();
   return pending;
@@ -405,6 +410,24 @@ describe('jiraFetcher.fetchEvents', () => {
     const result = await scan({ startDate: '2026-10-06', endDate: '2026-10-06' });
 
     expect(result.entries.map(e => [e.issueKey, e.date, e.comment])).toEqual([['A-1', '2026-10-06', 'Status: Open → Done']]);
+  });
+
+  it('makes new rows only on issues with an allowed component, but still counts and shows time logged elsewhere', async () => {
+    fakeJira({
+      issues: [
+        { key: 'A-1', components: ['DES-Systems'], comments: [{ author: ME, created: '2026-10-06T10:00:00.000+0700', text: 'allowed work' }] },
+        { key: 'B-1', components: ['Other'], worklogs: [{ author: ME, started: '2026-10-06T09:00:00.000+0700', timeSpentSeconds: 3 * 3600 }] },
+        { key: 'C-1', components: [], comments: [{ author: ME, created: '2026-10-06T11:00:00.000+0700', text: 'not allowed' }] },
+      ],
+    });
+
+    const result = await scan({ startDate: '2026-10-06', endDate: '2026-10-06', allowedComponents: ['des-systems', 'Anoman'] });
+
+    expect(result.entries.map(e => [e.issueKey, e.status, e.timeSpent])).toEqual([
+      ['A-1', 'ready', '5h'],
+      ['B-1', 'synced', '3h'],
+    ]);
+    expect(result.outsideComponents).toEqual(['C-1']);
   });
 });
 

@@ -30,7 +30,7 @@ export const jiraService = {
   async searchIssues(config: AuthConfig, jql: string, nextPageToken?: string, signal?: AbortSignal) {
     const queryParams = new URLSearchParams({
       jql,
-      fields: 'key,summary',
+      fields: 'key,summary,components',
       maxResults: '100',
     });
     if (nextPageToken) queryParams.set('nextPageToken', nextPageToken);
@@ -91,6 +91,14 @@ export const jiraService = {
     const response = await this.apiFetch(config, `/rest/api/3/issue/${issueKey}/worklog?${queryParams.toString()}`, { signal });
     if (!response.ok) throw new Error(`Failed to fetch worklogs for ${issueKey}`);
     return response.json();
+  },
+
+  /** Component names of one issue */
+  async getIssueComponents(config: AuthConfig, issueKey: string): Promise<string[]> {
+    const response = await this.apiFetch(config, `/rest/api/3/issue/${encodeURIComponent(issueKey)}?fields=components`);
+    if (!response.ok) throw new Error(`Could not read components of ${issueKey} (${response.status})`);
+    const issue = await response.json();
+    return (issue.fields?.components || []).map((c: { name?: string }) => c.name || '').filter(Boolean);
   },
 
   /**

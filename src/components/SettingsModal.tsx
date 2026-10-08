@@ -13,10 +13,11 @@ interface SettingsModalProps {
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
   const { config, user, error, saveConfig, disconnect } = useAuth();
-  const { dailyTarget, setDailyTarget, holidayCountry, setHolidayCountry } = usePreferences();
+  const { dailyTarget, setDailyTarget, holidayCountry, setHolidayCountry, allowedComponents, setAllowedComponents } = usePreferences();
   const [domain, setDomain] = useState(config?.domain || '');
   const [target, setTarget] = useState(dailyTarget);
   const [country, setCountry] = useState(holidayCountry);
+  const [components, setComponents] = useState(allowedComponents.join(', '));
   const [countries, setCountries] = useState<AvailableCountry[]>([]);
   const [countriesLoading, setCountriesLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -35,6 +36,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
     setSaving(true);
     setDailyTarget(target);
     setHolidayCountry(country);
+    setAllowedComponents(components);
     const connected = await saveConfig({ domain });
     setSaving(false);
     if (connected) onClose();
@@ -106,6 +108,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
           />
           <p id="settings-target-help" className={`mt-1 text-xs ${targetValid ? 'text-[var(--text-subtle)]' : 'text-[var(--danger)]'}`}>
             {targetValid ? 'Used by the scan and the day totals, e.g. 8h or 7h 30m.' : 'Enter a duration between 1m and 24h, e.g. 8h or 7h 30m.'}
+          </p>
+        </div>
+
+        <div>
+          <label htmlFor="settings-components" className="field-label">Allowed components</label>
+          <input
+            id="settings-components"
+            type="text"
+            className="field"
+            placeholder="e.g. DES-Systems, Anoman"
+            aria-describedby="settings-components-help"
+            value={components}
+            onChange={(e) => setComponents(e.target.value)}
+          />
+          <p id="settings-components-help" className="mt-1 text-xs text-[var(--text-subtle)]">
+            Comma list of Jira components you may log on. The scan only suggests these, and Sync refuses any other issue. Empty = all components.
           </p>
         </div>
 

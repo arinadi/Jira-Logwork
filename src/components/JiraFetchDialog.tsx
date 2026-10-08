@@ -21,12 +21,12 @@ const PRESETS: Array<{ id: ScanPreset; label: string }> = [
 
 export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ onClose, onImport }) => {
   const { config } = useAuth();
-  const { dailyTarget } = usePreferences();
+  const { dailyTarget, allowedComponents } = usePreferences();
   // Lazy init: the parent mounts this dialog on open, so "today" is the day the dialog is opened.
   const [range, setRange] = useState(() => defaultScanRange(new Date()));
   const [customJql, setCustomJql] = useState<string | null>(null);
   // An edited JQL is the user's own query: date changes must not overwrite it, only "Reset" does.
-  const jql = customJql ?? defaultScanJql(range.startDate, range.endDate);
+  const jql = customJql ?? defaultScanJql(range.startDate, range.endDate, allowedComponents);
 
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0, message: '' });
@@ -46,7 +46,7 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ onClose, onImp
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
-    const params: FetchParams = { ...range, jql, defaultTime: dailyTarget };
+    const params: FetchParams = { ...range, jql, defaultTime: dailyTarget, allowedComponents };
 
     try {
       const scanResult = await jiraFetcher.fetchEvents(
@@ -101,7 +101,7 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ onClose, onImp
   return (
     <Dialog
       title="Scan Jira history"
-      description={`Turns your worklogs, status changes and comments into rows. Daily target: ${dailyTarget} (change it in Settings).`}
+      description={`Turns your worklogs, status changes and comments into rows. Daily target: ${dailyTarget}${allowedComponents.length ? ` · only ${allowedComponents.join(' / ')}` : ''} (change in Settings).`}
       onClose={onClose}
       busy={isLoading}
       width="max-w-xl"
@@ -137,6 +137,11 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ onClose, onImp
           {scan.failedIssues.length > 0 && (
             <p role="alert" className="px-2 py-1.5 rounded-[3px] text-sm bg-[var(--danger-bg)] text-[var(--danger)]">
               Partial result: could not read {scan.failedIssues.join(', ')}. Their activity is missing.
+            </p>
+          )}
+          {scan.outsideComponents.length > 0 && (
+            <p className="px-2 py-1.5 rounded-[3px] text-sm bg-[var(--warn-bg)] text-[var(--warn)]">
+              Outside allowed components, no rows made: {scan.outsideComponents.join(', ')}.
             </p>
           )}
           {scan.fullDays.length > 0 && (

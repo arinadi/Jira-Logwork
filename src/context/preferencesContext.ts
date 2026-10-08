@@ -9,6 +9,10 @@ export interface PreferencesContextType {
   /** ISO country code used for public holidays */
   holidayCountry: string;
   setHolidayCountry: (countryCode: string) => void;
+  /** Components worklogs may go to; empty = all */
+  allowedComponents: string[];
+  /** Takes the comma list as typed */
+  setAllowedComponents: (text: string) => void;
 }
 
 export const PreferencesContext = createContext<PreferencesContextType | undefined>(undefined);

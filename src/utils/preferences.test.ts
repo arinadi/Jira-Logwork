@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { loadDailyTarget, loadTheme, saveDailyTarget, saveTheme } from './preferences';
+import { loadAllowedComponents, loadDailyTarget, loadTheme, parseAllowedComponents, saveAllowedComponents, saveDailyTarget, saveTheme } from './preferences';
 
 /** In-memory stand-in for window.localStorage. */
 function memoryStorage(): Storage {
@@ -43,3 +43,20 @@ describe('theme', () => {
     expect(loadTheme(storage, true)).toBe('light');
   });
 });
+
+describe('allowed components', () => {
+  it('reads a comma list: trimmed, empty parts dropped, duplicates (any case) removed', () => {
+    expect(parseAllowedComponents(' DES-Systems, Anoman ,, des-systems ')).toEqual(['DES-Systems', 'Anoman']);
+    expect(parseAllowedComponents('  ')).toEqual([]);
+  });
+
+  it('is empty (all allowed) until saved, then keeps the saved list', () => {
+    const storage = memoryStorage();
+    expect(loadAllowedComponents(storage)).toEqual([]);
+
+    saveAllowedComponents(storage, 'DES-Systems, Anoman');
+
+    expect(loadAllowedComponents(storage)).toEqual(['DES-Systems', 'Anoman']);
+  });
+});
+

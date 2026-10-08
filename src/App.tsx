@@ -23,13 +23,13 @@ function AppContent() {
   const [showSummary, setShowSummary] = useState(false);
   const [showFetchDialog, setShowFetchDialog] = useState(false);
   const { config } = useAuth();
-  const { dailyTargetMinutes, holidayCountry } = usePreferences();
+  const { dailyTargetMinutes, holidayCountry, allowedComponents } = usePreferences();
 
   const {
     entries, isMapping, pendingData, importFile, applyMapping, updateEntry, removeEntry,
     copyEntryToDates, clearEntries, addEntries, cancelMapping,
   } = useCSV();
-  const { syncSingleEntry, syncAllValid, isSyncing, progress } = useSync(entries, updateEntry);
+  const { syncSingleEntry, syncAllValid, isSyncing, progress } = useSync(entries, updateEntry, allowedComponents);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');

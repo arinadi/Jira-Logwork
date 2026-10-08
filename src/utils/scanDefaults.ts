@@ -18,11 +18,16 @@ export function defaultScanRange(now: Date): { startDate: string; endDate: strin
  * currentUser() instead of a name: names are not unique and Jira Cloud JQL resolves them unreliably.
  * A JQL date means 00:00 of that day, so DURING ends at the day after the range.
  */
-export function defaultScanJql(startDate: string, endDate: string): string {
+export function defaultScanJql(startDate: string, endDate: string, allowedComponents: string[] = []): string {
   const dayAfterEnd = format(addDays(parseISO(endDate), 1), 'yyyy-MM-dd');
-  return `worklogAuthor = currentUser() AND worklogDate >= "${startDate}" AND worklogDate <= "${endDate}"`
-    + ` OR status CHANGED BY currentUser() DURING ("${startDate}", "${dayAfterEnd}")`
+  const ownWorklogs = `worklogAuthor = currentUser() AND worklogDate >= "${startDate}" AND worklogDate <= "${endDate}"`;
+  const activity = `status CHANGED BY currentUser() DURING ("${startDate}", "${dayAfterEnd}")`
     + ` OR watcher = currentUser() AND updated >= "${startDate}"`;
+  if (allowedComponents.length === 0) return `${ownWorklogs} OR ${activity}`;
+  // Only the activity part is limited: own worklogs on any issue must still be found so the day total is right.
+  // This only makes the scan smaller; jiraFetcher enforces the component rule itself.
+  const components = allowedComponents.map(c => `"${c.replace(/"/g, '\\"')}"`).join(', ');
+  return `${ownWorklogs} OR (${activity}) AND component in (${components})`;
 }
 
 export type ScanPreset = 'thisWeek' | 'lastWeek' | 'thisMonth';

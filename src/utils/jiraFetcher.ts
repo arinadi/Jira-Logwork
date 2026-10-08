@@ -9,6 +9,8 @@ export interface FetchParams {
   startDate: string;
   endDate: string;
   defaultTime?: string;
+  /** Component names new rows are allowed on; empty or missing = all. */
+  allowedComponents?: string[];
 }
 
 /**
@@ -115,6 +117,8 @@ export interface ScanResult {
   fullDays: string[];
   /** Issues whose history could not be read; their activity is missing from entries. */
   failedIssues: string[];
+  /** Issues with activity but none of the allowed components; no new rows were made for them. */
+  outsideComponents: string[];
 }
 
 /** Raw event collected before smart distribution */
@@ -141,7 +145,8 @@ export const jiraFetcher = {
     onProgress?: (current: number, total: number, message: string) => void,
     signal?: AbortSignal
   ): Promise<ScanResult> {
-    const { jql, startDate, endDate, defaultTime = '8h' } = params;
+    const { jql, startDate, endDate, defaultTime = '8h', allowedComponents = [] } = params;
+    const allowed = new Set(allowedComponents.map(c => c.toLowerCase()));
     const start = parseISO(startDate);
     // End date must include the full day — shift to next midnight so isWithinInterval is inclusive
     const end = addDays(parseISO(endDate), 1);
@@ -154,6 +159,7 @@ export const jiraFetcher = {
     onProgress?.(0, 1, 'Searching for matching issues...');
     const issueMap = new Map<string, string>(); // key -> summary
     const keyById = new Map<string, string>(); // bulk changelog answers by issue ID
+    const componentsByKey = new Map<string, string[]>(); // lower-case component names
     const collectIssues = async (query: string) => {
       let nextPageToken: string | undefined;
       while (!signal?.aborted) {
@@ -163,6 +169,7 @@ export const jiraFetcher = {
           const summary = issue.fields?.summary || issue.key;
           issueMap.set(issue.key, summary);
           if (issue.id) keyById.set(String(issue.id), issue.key);
+          componentsByKey.set(issue.key, (issue.fields?.components || []).map((c: { name?: string }) => (c.name || '').toLowerCase()));
         }
         if (data.isLast || !data.nextPageToken) break;
         nextPageToken = data.nextPageToken;
@@ -341,6 +348,16 @@ export const jiraFetcher = {
       }
     }
 
+    // 4a'. Only issues with an allowed component may get NEW rows. Rows for existing worklogs stay: that time
+    // is already in Jira and must count toward the day, or the split would plan the day past its target.
+    const isAllowed = (key: string) => allowed.size === 0 || (componentsByKey.get(key) || []).some(c => allowed.has(c));
+    const outsideComponents = new Set<string>();
+    for (const [mergeKey, entry] of merged) {
+      if (existingWorklogs.has(mergeKey) || isAllowed(entry.issueKey)) continue;
+      merged.delete(mergeKey);
+      outsideComponents.add(entry.issueKey);
+    }
+
     // 4b. Group merged entries by date for time distribution
     const byDate = new Map<string, Array<{ issueKey: string; date: string; summary: string; comment: string; transitions: string[] }>>();
     for (const entry of merged.values()) {
@@ -403,7 +420,7 @@ export const jiraFetcher = {
 
     onProgress?.(totalSteps, totalSteps, `Done! ${entries.length} worklogs across ${byDate.size} days.`);
     fullDays.sort();
-    return { entries, fullDays, failedIssues };
+    return { entries, fullDays, failedIssues, outsideComponents: Array.from(outsideComponents).sort() };
   }
 };
 
