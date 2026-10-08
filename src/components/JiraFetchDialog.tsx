@@ -7,13 +7,13 @@ import { defaultScanJql, defaultScanRange, scanPresetRange, type ScanPreset } fr
 import { csvExporter } from '../utils/csvExporter';
 import { holidayService } from '../services/holidays';
 import { fetchHrmsLeave } from '../services/hrms';
-import { leaveMinutesByDay } from '../utils/hrmsLeave';
+import { leaveMinutesByDay, leaveTypesByDay } from '../utils/hrmsLeave';
 import type { WorklogEntry } from '../types/worklog';
 import { Dialog } from './Dialog';
 
 interface JiraFetchDialogProps {
   onClose: () => void;
-  onImport: (entries: WorklogEntry[], leave: { range: { startDate: string; endDate: string }; byDay: Record<string, number> } | null) => void;
+  onImport: (entries: WorklogEntry[], leave: { range: { startDate: string; endDate: string }; byDay: Record<string, number>; typesByDay: Record<string, string[]> } | null) => void;
 }
 
 const PRESETS: Array<{ id: ScanPreset; label: string }> = [
@@ -24,7 +24,8 @@ const PRESETS: Array<{ id: ScanPreset; label: string }> = [
 
 export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ onClose, onImport }) => {
   const { config } = useAuth();
-  const { dailyTarget, allowedComponents, workingStatuses, holidayCountry, readHrms } = usePreferences();
+  const { dailyTarget, allowedComponents, workingStatuses, holidayCountry, readHrms, leaveTickets } = usePreferences();
+  const [leaveTypes, setLeaveTypes] = useState<Record<string, string[]>>({});
   // Lazy init: the parent mounts this dialog on open, so "today" is the day the dialog is opened.
   const [range, setRange] = useState(() => defaultScanRange(new Date()));
   const [customJql, setCustomJql] = useState<string | null>(null);
@@ -70,14 +71,19 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ onClose, onImp
     if (readHrms) {
       try {
         setProgress({ current: 0, total: 0, message: 'Reading leave from HRMS…' });
-        leave = leaveMinutesByDay(await fetchHrmsLeave(controller.signal));
+        const records = await fetchHrmsLeave(controller.signal);
+        leave = leaveMinutesByDay(records);
+        setLeaveTypes(leaveTypesByDay(records));
         setLeaveRead(true);
       } catch (err) {
         if ((err as Error).name === 'AbortError') throw err;
         setHrmsWarning(`Leave not read: ${(err as Error).message}`);
       }
     }
-    const params: FetchParams = { ...range, jql, defaultTime: dailyTarget, allowedComponents, workingStatuses, nonWorkingDays, leaveMinutesByDay: leave };
+    const params: FetchParams = {
+      ...range, jql, defaultTime: dailyTarget, allowedComponents, workingStatuses, nonWorkingDays, leaveMinutesByDay: leave,
+      leaveTickets: [leaveTickets.annual, leaveTickets.sick].filter(Boolean),
+    };
 
     try {
       const scanResult = await jiraFetcher.fetchEvents(
@@ -119,7 +125,11 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ onClose, onImp
         <Download className="w-4 h-4" aria-hidden="true" /> Export CSV
       </button>
       <button type="button" className="btn-primary" disabled={entries.length === 0}
-        onClick={() => { onImport(entries, leaveRead && scan ? { range: scannedRange, byDay: scan.leaveByDay } : null); onClose(); }}>
+        onClick={() => {
+          const typesInRange = Object.fromEntries(Object.entries(leaveTypes).filter(([d]) => d >= scannedRange.startDate && d <= scannedRange.endDate));
+          onImport(entries, leaveRead && scan ? { range: scannedRange, byDay: scan.leaveByDay, typesByDay: typesInRange } : null);
+          onClose();
+        }}>
         Add {entries.length} rows to workspace
       </button>
     </>

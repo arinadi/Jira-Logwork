@@ -15,7 +15,7 @@ import { useSync } from './hooks/useSync';
 import { useHolidays } from './hooks/useHolidays';
 import { formatMinutes, groupByDay, rangeSummary } from './utils/dayGroups';
 import { loadTheme, saveTheme, type Theme } from './utils/preferences';
-import { loadLeave, saveLeave } from './utils/workspaceStorage';
+import { loadLeave, loadLeaveTypes, saveLeave, saveLeaveTypes } from './utils/workspaceStorage';
 import type { WorklogEntry } from './types/worklog';
 import { isBatchSyncable } from './utils/syncRules';
 
@@ -25,14 +25,16 @@ function AppContent() {
   const [showSummary, setShowSummary] = useState(false);
   const [showFetchDialog, setShowFetchDialog] = useState(false);
   const [leave, setLeave] = useState(() => loadLeave(localStorage));
+  const [leaveTypes, setLeaveTypes] = useState(() => loadLeaveTypes(localStorage));
   const { config } = useAuth();
-  const { dailyTargetMinutes, holidayCountry, allowedComponents } = usePreferences();
+  const { dailyTargetMinutes, holidayCountry, allowedComponents, leaveTickets } = usePreferences();
+  const leaveTicketKeys = useMemo(() => [leaveTickets.annual, leaveTickets.sick].filter(Boolean), [leaveTickets]);
 
   const {
     entries, isMapping, pendingData, importFile, applyMapping, updateEntry, removeEntry,
-    copyEntryToDates, acceptSuggestions, clearEntries, addEntries, cancelMapping,
+    copyEntryToDates, acceptSuggestions, addEntry, clearEntries, addEntries, cancelMapping,
   } = useCSV();
-  const { syncSingleEntry, syncAllValid, isSyncing, progress } = useSync(entries, updateEntry, allowedComponents);
+  const { syncSingleEntry, syncAllValid, isSyncing, progress } = useSync(entries, updateEntry, allowedComponents, leaveTicketKeys);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
@@ -50,8 +52,8 @@ function AppContent() {
   }, [entries]);
   const holidays = useHolidays(years, holidayCountry);
   const groups = useMemo(
-    () => groupByDay(entries, { targetMinutes: dailyTargetMinutes, holidays, today: format(new Date(), 'yyyy-MM-dd'), leave: new Map(Object.entries(leave)) }),
-    [entries, dailyTargetMinutes, holidays, leave]
+    () => groupByDay(entries, { targetMinutes: dailyTargetMinutes, holidays, today: format(new Date(), 'yyyy-MM-dd'), leave: new Map(Object.entries(leave)), leaveTickets: leaveTicketKeys }),
+    [entries, dailyTargetMinutes, holidays, leave, leaveTicketKeys]
   );
   const summary = rangeSummary(groups, dailyTargetMinutes);
   const dated = groups.filter(g => g.date !== '');
@@ -61,11 +63,13 @@ function AppContent() {
   const syncedCount = entries.filter(e => e.status === 'synced').length;
   const failedCount = entries.filter(e => e.status === 'failed' || e.status === 'error').length;
 
-  const handleImport = (fetched: WorklogEntry[], scanLeave: { range: { startDate: string; endDate: string }; byDay: Record<string, number> } | null) => {
+  const handleImport = (fetched: WorklogEntry[], scanLeave: { range: { startDate: string; endDate: string }; byDay: Record<string, number>; typesByDay: Record<string, string[]> } | null) => {
     addEntries(fetched);
     if (scanLeave) {
       saveLeave(localStorage, scanLeave.range, scanLeave.byDay);
       setLeave(loadLeave(localStorage));
+      saveLeaveTypes(localStorage, scanLeave.range, scanLeave.typesByDay);
+      setLeaveTypes(loadLeaveTypes(localStorage));
     }
   };
 
@@ -162,6 +166,8 @@ function AppContent() {
               onRemove={removeEntry}
               onCopyToDays={copyEntryToDates}
               onAcceptSuggestions={acceptSuggestions}
+              leave={{ tickets: leaveTickets, minutesByDay: leave, typesByDay: leaveTypes, entries }}
+              onAddEntry={addEntry}
               onSyncRow={syncSingleEntry}
             />
           </>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { loadLeave, loadWorkspace, saveLeave, saveWorkspace } from './workspaceStorage';
+import { loadLeave, loadLeaveTypes, loadWorkspace, saveLeave, saveLeaveTypes, saveWorkspace } from './workspaceStorage';
 import type { WorklogEntry } from '../types/worklog';
 
 /** In-memory stand-in for window.localStorage. */
@@ -48,6 +48,17 @@ describe('leave storage', () => {
     saveLeave(storage, { startDate: '2026-09-15', endDate: '2026-09-30' }, { '2026-09-22': 480 });
 
     expect(loadLeave(storage)).toEqual({ '2026-09-07': 240, '2026-09-22': 480 });
+  });
+});
+
+describe('leave types storage', () => {
+  it('keeps leave types per day; a new scan replaces only the days of its own range', () => {
+    const storage = memoryStorage();
+    saveLeaveTypes(storage, { startDate: '2026-03-01', endDate: '2026-03-31' }, { '2026-03-02': ['Sick leave'], '2026-03-30': ['Long service leave'] });
+
+    saveLeaveTypes(storage, { startDate: '2026-03-15', endDate: '2026-03-31' }, { '2026-03-31': ['Annual leave'] });
+
+    expect(loadLeaveTypes(storage)).toEqual({ '2026-03-02': ['Sick leave'], '2026-03-31': ['Annual leave'] });
   });
 });
 

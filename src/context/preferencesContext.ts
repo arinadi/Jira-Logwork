@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react';
+import type { LeaveTickets } from '../utils/preferences';
 
 export interface PreferencesContextType {
   /** Jira duration text, e.g. "8h" */
@@ -19,6 +20,9 @@ export interface PreferencesContextType {
   /** Read approved leave from Gameloft HRMS on every scan */
   readHrms: boolean;
   setReadHrms: (on: boolean) => void;
+  /** Issue keys for annual / sick leave; '' = not set */
+  leaveTickets: LeaveTickets;
+  setLeaveTickets: (tickets: LeaveTickets) => void;
 }
 
 export const PreferencesContext = createContext<PreferencesContextType | undefined>(undefined);

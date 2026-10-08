@@ -47,3 +47,21 @@ export function loadLeave(storage: Storage): Record<string, number> {
     return {};
   }
 }
+
+export const LEAVE_TYPES_STORAGE_KEY = 'jira_logwork_leave_types';
+
+/** Same range rule as saveLeave: the scanned range is replaced, other days are kept. */
+export function saveLeaveTypes(storage: Storage, range: { startDate: string; endDate: string }, typesByDay: Record<string, string[]>): void {
+  const kept = Object.entries(loadLeaveTypes(storage)).filter(([date]) => date < range.startDate || date > range.endDate);
+  storage.setItem(LEAVE_TYPES_STORAGE_KEY, JSON.stringify({ ...Object.fromEntries(kept), ...typesByDay }));
+}
+
+export function loadLeaveTypes(storage: Storage): Record<string, string[]> {
+  try {
+    const parsed = JSON.parse(storage.getItem(LEAVE_TYPES_STORAGE_KEY) || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch (e) {
+    console.error('Saved leave types are not valid JSON; ignoring them', e);
+    return {};
+  }
+}

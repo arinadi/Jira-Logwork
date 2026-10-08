@@ -6,6 +6,9 @@ import { formatMinutes, type DayGroup } from '../utils/dayGroups';
 import { validateEntry } from '../utils/validation';
 import { EditableCell } from './DataGrid/EditableCell';
 import { CopyToDaysDialog } from './CopyToDaysDialog';
+import { leaveRowFor } from '../utils/leaveRow';
+import { leaveKind, type LeaveKind } from '../utils/hrmsLeave';
+import type { LeaveTickets } from '../utils/preferences';
 
 interface DayGroupListProps {
   groups: DayGroup[];
@@ -16,7 +19,12 @@ interface DayGroupListProps {
   onCopyToDays: (id: string, dates: string[]) => void;
   onSyncRow: (entry: WorklogEntry) => void;
   onAcceptSuggestions: (date: string) => void;
+  /** Leave tickets + HRMS leave, for the "Add … leave" buttons */
+  leave: { tickets: LeaveTickets; minutesByDay: Record<string, number>; typesByDay: Record<string, string[]>; entries: WorklogEntry[] };
+  onAddEntry: (entry: WorklogEntry) => void;
 }
+
+const LEAVE_LABEL: Record<LeaveKind, string> = { annual: 'Add annual leave', sick: 'Add sick leave' };
 
 const dayTitle = (date: string) => (date ? format(parseISO(date), 'EEE dd MMM yyyy') : 'No valid date');
 
@@ -44,7 +52,7 @@ const toneClass = {
 
 const barClass = { ok: 'bg-[var(--ok)]', warn: 'bg-[var(--warn)]', danger: 'bg-[var(--danger)]', off: 'bg-[var(--off)]', none: 'bg-[var(--text-subtle)]' };
 
-export const DayGroupList: React.FC<DayGroupListProps> = ({ groups, targetMinutes, jiraDomain, onUpdate, onRemove, onCopyToDays, onSyncRow, onAcceptSuggestions }) => {
+export const DayGroupList: React.FC<DayGroupListProps> = ({ groups, targetMinutes, jiraDomain, onUpdate, onRemove, onCopyToDays, onSyncRow, onAcceptSuggestions, leave, onAddEntry }) => {
   const [copySource, setCopySource] = useState<WorklogEntry | null>(null);
   const datedDays = groups.filter(g => g.date !== '').map(g => g.date);
 
@@ -54,6 +62,17 @@ export const DayGroupList: React.FC<DayGroupListProps> = ({ groups, targetMinute
         const state = dayStateText(group);
         const headingId = `day-${group.date || 'undated'}`;
         const dayTarget = group.date ? group.targetMinutes : targetMinutes;
+        // Leave buttons on working days only (weekends and holidays need no leave), HRMS's own kind first.
+        const hrmsTypes = leave.typesByDay[group.date] || [];
+        const leaveKinds: LeaveKind[] = hrmsTypes.some(t => leaveKind(t) === 'sick') ? ['sick', 'annual'] : ['annual', 'sick'];
+        const leaveRows = group.date && !group.isWeekend && !group.holidayName
+          ? leaveKinds
+            .map(kind => ({ kind, row: leaveRowFor({
+              date: group.date, kind, tickets: leave.tickets, hrmsLeaveMinutes: leave.minutesByDay[group.date] || 0,
+              hrmsTypes, targetMinutes, existing: leave.entries,
+            }) }))
+            .filter((x): x is { kind: LeaveKind; row: WorklogEntry } => x.row !== null)
+          : [];
         const fill = dayTarget > 0 ? Math.min(100, (group.totalMinutes / dayTarget) * 100) : 0;
         return (
           <section key={group.date || 'undated'} aria-labelledby={headingId} className={`card ${group.state === 'off' && group.date ? 'opacity-90' : ''}`}>
@@ -67,6 +86,17 @@ export const DayGroupList: React.FC<DayGroupListProps> = ({ groups, targetMinute
                 {group.state !== 'off' && group.date && <span className="text-[var(--text-subtle)]"> / {formatMinutes(dayTarget)}</span>}
               </span>
               <span className={`lozenge ${toneClass[state.tone]}`}>{state.text}</span>
+              {leaveRows.map(({ kind, row }) => (
+                <button
+                  key={kind}
+                  type="button"
+                  className="btn h-6 px-2 text-xs"
+                  onClick={() => onAddEntry(row)}
+                  aria-label={`${LEAVE_LABEL[kind]} on ${dayTitle(group.date)}: ${row.timeSpent} on ${row.issueKey}`}
+                >
+                  {LEAVE_LABEL[kind]} · {row.timeSpent}
+                </button>
+              ))}
               {group.leaveMinutes > 0 && group.state !== 'off' && (
                 <span className="lozenge bg-[var(--off-bg)] text-[var(--off)]">Leave {formatMinutes(group.leaveMinutes)}</span>
               )}

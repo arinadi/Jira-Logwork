@@ -75,3 +75,17 @@ describe('groupByDay with leave', () => {
     expect(rangeSummary(groups, 8 * 60)).toEqual({ loggedMinutes: 19 * 60, targetMinutes: 20 * 60, workingDays: 3 });
   });
 });
+
+describe('groupByDay with leave tickets', () => {
+  it('counts time on the leave ticket as the leave itself, so 4h leave + 4h leave ticket + 4h work is met', () => {
+    const entries = [row('DESP-35490', '2026-03-30', '4h'), row('DESP-36823', '2026-03-30', '4h')];
+    const leave = new Map([['2026-03-30', 240]]);
+
+    const [withTicket] = groupByDay(entries, { ...options, leave, leaveTickets: ['DESP-36823'] });
+    const [withoutTicket] = groupByDay(entries, { ...options, leave });
+
+    expect([withTicket.totalMinutes, withTicket.targetMinutes, withTicket.state, withTicket.overtimeMinutes, withTicket.leaveMinutes])
+      .toEqual([480, 480, 'met', 0, 240]);
+    expect([withoutTicket.targetMinutes, withoutTicket.state]).toEqual([240, 'over']);
+  });
+});

@@ -18,6 +18,8 @@ export interface FetchParams {
   workingStatuses?: string[];
   /** yyyy-MM-dd → minutes of approved leave that day (from HRMS); lowers that day's target */
   leaveMinutesByDay?: Record<string, number>;
+  /** Issue keys where leave is logged: time there is the leave itself; exempt from components; never suggested */
+  leaveTickets?: string[];
 }
 
 /**
@@ -157,7 +159,8 @@ export const jiraFetcher = {
     onProgress?: (current: number, total: number, message: string) => void,
     signal?: AbortSignal
   ): Promise<ScanResult> {
-    const { jql, startDate, endDate, defaultTime = '8h', allowedComponents = [], nonWorkingDays = [], workingStatuses = [], leaveMinutesByDay = {} } = params;
+    const { jql, startDate, endDate, defaultTime = '8h', allowedComponents = [], nonWorkingDays = [], workingStatuses = [], leaveMinutesByDay = {}, leaveTickets = [] } = params;
+    const leaveTicketSet = new Set(leaveTickets);
     const allowed = new Set(allowedComponents.map(c => c.toLowerCase()));
     const start = parseISO(startDate);
     // End date must include the full day — shift to next midnight so isWithinInterval is inclusive
@@ -384,7 +387,8 @@ export const jiraFetcher = {
 
     // 4a'. Only issues with an allowed component may get NEW rows. Rows for existing worklogs stay: that time
     // is already in Jira and must count toward the day, or the split would plan the day past its target.
-    const isAllowed = (key: string) => allowed.size === 0 || (componentsByKey.get(key) || []).some(c => allowed.has(c));
+    // Leave tickets are where leave must go, whatever their component.
+    const isAllowed = (key: string) => leaveTicketSet.has(key) || allowed.size === 0 || (componentsByKey.get(key) || []).some(c => allowed.has(c));
     const outsideComponents = new Set<string>();
     for (const [mergeKey, entry] of merged) {
       if (existingWorklogs.has(mergeKey) || isAllowed(entry.issueKey)) continue;
@@ -413,8 +417,13 @@ export const jiraFetcher = {
         .filter(t => !existingWorklogs.has(`${t.issueKey}::${date}`))
         .map(t => t.issueKey)
         .sort();
-      // Leave hours are not working hours: they come off the day's target before anything is split.
-      const leaveSeconds = (leaveMinutesByDay[date] || 0) * 60;
+      // Leave hours are not working hours: they come off the day's target before anything is split —
+      // except the part already logged on a leave ticket, which is counted in loggedSecondsOnDay already.
+      let onLeaveTicketsSeconds = 0;
+      for (const [k, logged] of existingWorklogs) {
+        if (k.endsWith(`::${date}`) && leaveTicketSet.has(k.slice(0, k.length - date.length - 2))) onLeaveTicketsSeconds += logged.seconds;
+      }
+      const leaveSeconds = Math.max(0, (leaveMinutesByDay[date] || 0) * 60 - onLeaveTicketsSeconds);
       const onFullLeave = leaveSeconds >= dailyHours * 3600;
       // Floor to whole minutes: Jira takes minutes, and rounding up could push the day over target.
       const freeMinutes = Math.max(0, Math.floor((dailyHours * 3600 - leaveSeconds - loggedSecondsOnDay) / 60));
@@ -503,7 +512,10 @@ export const jiraFetcher = {
     let workingDaysSinceActive = 0;
     for (const day of eachDayOfInterval({ start, end: addDays(end, -1) })) {
       const date = format(day, 'yyyy-MM-dd');
-      const dayTarget = targetMinutes - (leaveMinutesByDay[date] || 0);
+      const onLeaveTickets = entries
+        .filter(e => e.date === date && leaveTicketSet.has(e.issueKey))
+        .reduce((sum, e) => sum + Math.round((parseDurationToHours(e.timeSpent) || 0) * 60), 0);
+      const dayTarget = targetMinutes - Math.max(0, (leaveMinutesByDay[date] || 0) - onLeaveTickets);
       // A full leave day is not a working day: not a carry-over source, not counted toward the carry-over limit.
       if (isWeekend(day) || nonWorking.has(date) || dayTarget <= 0) continue;
       const realRows = entries.filter(e => e.date === date && !e.suggestion);
@@ -517,7 +529,8 @@ export const jiraFetcher = {
       // 1. Tickets I had in a working status that day: the best evidence of what the day was spent on.
       const dayStart = day.getTime();
       const dayEnd = addDays(day, 1).getTime();
-      const inProgress = allIssueKeys.filter(key => isAllowed(key) && workedOn(key, dayStart, dayEnd)).sort();
+      // A leave ticket is never a guess for work: leave is added on purpose ("Add leave").
+      const inProgress = allIssueKeys.filter(key => !leaveTicketSet.has(key) && isAllowed(key) && workedOn(key, dayStart, dayEnd)).sort();
       if (inProgress.length > 0) {
         suggest(date, dayTarget, inProgress.map(key => ({ issueKey: key, comment: `In progress: ${issueMap.get(key) || key}` })), 'in-progress');
         continue;
@@ -528,7 +541,7 @@ export const jiraFetcher = {
       if (lastActiveRows.length > 0 && workingDaysSinceActive <= CARRY_OVER_WORKING_DAYS) {
         const seen = new Set<string>();
         const carried = lastActiveRows
-          .filter(r => isAllowed(r.issueKey) && !seen.has(r.issueKey) && seen.add(r.issueKey))
+          .filter(r => !leaveTicketSet.has(r.issueKey) && isAllowed(r.issueKey) && !seen.has(r.issueKey) && seen.add(r.issueKey))
           .sort((a, b) => a.issueKey.localeCompare(b.issueKey))
           .map(r => ({ issueKey: r.issueKey, comment: `Continued: ${r.comment}` }));
         if (carried.length > 0) suggest(date, dayTarget, carried, 'carry-over');

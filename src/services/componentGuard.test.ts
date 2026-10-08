@@ -35,4 +35,14 @@ describe('createComponentGuard', () => {
     expect(await createComponentGuard(config, [])('A-1')).toEqual({ allowed: true, components: [] });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it('lets leave tickets through without asking Jira, whatever their component', async () => {
+    const fetchMock = fakeIssues({ 'HR-1': ['HR'] });
+
+    const check = createComponentGuard(config, ['DES-Systems'], ['HR-1']);
+
+    expect((await check('HR-1')).allowed).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
+

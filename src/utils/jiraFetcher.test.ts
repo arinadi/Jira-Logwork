@@ -190,7 +190,7 @@ function fakeJira({ issues, searchByJql = () => issues.map(i => i.key), pageSize
 }
 
 /** Runs a scan to the end while fake timers skip the throttle delays. */
-async function scan(params: { jql?: string; startDate: string; endDate: string; defaultTime?: string; allowedComponents?: string[]; nonWorkingDays?: string[]; workingStatuses?: string[]; leaveMinutesByDay?: Record<string, number> }) {
+async function scan(params: { jql?: string; startDate: string; endDate: string; defaultTime?: string; allowedComponents?: string[]; nonWorkingDays?: string[]; workingStatuses?: string[]; leaveMinutesByDay?: Record<string, number>; leaveTickets?: string[] }) {
   const pending = jiraFetcher.fetchEvents(config, { jql: params.jql ?? 'project = A', ...params });
   await vi.runAllTimersAsync();
   return pending;
@@ -623,6 +623,45 @@ describe('jiraFetcher.fetchEvents', () => {
 
       expect(result.entries.filter(e => e.date === '2026-10-06').map(e => [e.issueKey, e.timeSpent, e.suggestion]))
         .toEqual([['X-1', '4h', 'in-progress']]);
+    });
+  });
+
+  describe('leave tickets', () => {
+    // Mon 30 Mar 2026: 4h HRMS leave, already logged on the leave ticket L-1; own comment on A-1.
+    const marchIssues = (): FakeIssue[] => [
+      { key: 'A-1', components: ['DES-Systems'], comments: [{ author: ME, created: '2026-03-30T10:00:00.000+0700', text: 'fixing' }] },
+      {
+        key: 'L-1', components: ['HR'], currentStatus: 'In Progress', currentAssignee: ME,
+        assigneeChanges: [{ created: '2026-03-01T09:00:00.000+0700', from: null, to: ME }],
+        worklogs: [{ author: ME, started: '2026-03-30T08:00:00.000+0700', timeSpentSeconds: 4 * 3600, text: 'Long service leave' }],
+      },
+    ];
+
+    it('does not subtract leave that is already logged on a leave ticket', async () => {
+      fakeJira({ issues: marchIssues() });
+
+      const result = await scan({
+        startDate: '2026-03-30', endDate: '2026-03-30', allowedComponents: ['DES-Systems'],
+        leaveMinutesByDay: { '2026-03-30': 240 }, leaveTickets: ['L-1'],
+      });
+
+      expect(result.entries.map(e => [e.issueKey, e.timeSpent, e.status])).toEqual([
+        ['A-1', '4h', 'ready'],
+        ['L-1', '4h', 'synced'],
+      ]);
+      expect(result.fullDays).toEqual([]);
+      expect(result.outsideComponents).toEqual([]);
+    });
+
+    it('never suggests a leave ticket for an empty day', async () => {
+      fakeJira({ issues: marchIssues() });
+
+      const result = await scan({
+        startDate: '2026-03-30', endDate: '2026-03-31', allowedComponents: ['DES-Systems', 'HR'],
+        leaveMinutesByDay: { '2026-03-30': 240 }, leaveTickets: ['L-1'],
+      });
+
+      expect(result.entries.filter(e => e.date === '2026-03-31').map(e => [e.issueKey, e.suggestion])).toEqual([['A-1', 'carry-over']]);
     });
   });
 });

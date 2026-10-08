@@ -9,15 +9,16 @@ import { createComponentGuard } from '../services/componentGuard';
 export const useSync = (
   entries: WorklogEntry[],
   onUpdateEntry: (id: string, updates: Partial<WorklogEntry>) => void,
-  allowedComponents: string[] = []
+  allowedComponents: string[] = [],
+  leaveTickets: string[] = []
 ) => {
   const { config } = useAuth();
   const [isSyncing, setIsSyncing] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   // One guard per settings change: it caches each issue's components, so a batch asks Jira once per issue.
   const checkComponents = useMemo(
-    () => (config ? createComponentGuard(config, allowedComponents) : null),
-    [config, allowedComponents]
+    () => (config ? createComponentGuard(config, allowedComponents, leaveTickets) : null),
+    [config, allowedComponents, leaveTickets]
   );
 
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));

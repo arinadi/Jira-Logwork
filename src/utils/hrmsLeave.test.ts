@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { leaveMinutesByDay, type HrmsLeaveRecord } from './hrmsLeave';
+import { leaveKind, leaveMinutesByDay, leaveTypesByDay, type HrmsLeaveRecord } from './hrmsLeave';
 
 // Shaped like HRMS ajax-get-my-requests rows; made-up dates, no personal data.
 const leave = (over: Partial<HrmsLeaveRecord>): HrmsLeaveRecord => ({
@@ -32,3 +32,22 @@ describe('leaveMinutesByDay', () => {
     ])).toEqual({ '2026-09-10': 480 });
   });
 });
+
+describe('leave kind and types per day', () => {
+  it('treats sick types as sick leave and every other type as annual leave', () => {
+    expect(leaveKind('Sick leave')).toBe('sick');
+    expect(leaveKind('Cuti Sakit')).toBe('sick');
+    expect(leaveKind('Long service leave')).toBe('annual');
+    expect(leaveKind('Annual leave')).toBe('annual');
+  });
+
+  it('lists the approved leave types of each weekday, once each', () => {
+    expect(leaveTypesByDay([
+      leave({ from_date: '2026-09-10', to_date: '2026-09-11', leave_type: 'Annual leave' }),
+      leave({ from_date: '2026-09-11', to_date: '2026-09-11', from_time: '13:00:00', leave_type: 'Sick leave' }),
+      leave({ from_date: '2026-09-11', to_date: '2026-09-11', leave_type: 'Annual leave' }),
+      leave({ from_date: '2026-09-14', to_date: '2026-09-14', status: 'Denied' }),
+    ])).toEqual({ '2026-09-10': ['Annual leave'], '2026-09-11': ['Annual leave', 'Sick leave'] });
+  });
+});
+

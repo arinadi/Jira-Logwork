@@ -13,13 +13,15 @@ interface SettingsModalProps {
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
   const { config, user, error, saveConfig, disconnect } = useAuth();
-  const { dailyTarget, setDailyTarget, holidayCountry, setHolidayCountry, allowedComponents, setAllowedComponents, workingStatuses, setWorkingStatuses, readHrms, setReadHrms } = usePreferences();
+  const { dailyTarget, setDailyTarget, holidayCountry, setHolidayCountry, allowedComponents, setAllowedComponents, workingStatuses, setWorkingStatuses, readHrms, setReadHrms, leaveTickets, setLeaveTickets } = usePreferences();
   const [domain, setDomain] = useState(config?.domain || '');
   const [target, setTarget] = useState(dailyTarget);
   const [country, setCountry] = useState(holidayCountry);
   const [components, setComponents] = useState(allowedComponents.join(', '));
   const [statuses, setStatuses] = useState(workingStatuses.join(', '));
   const [hrms, setHrms] = useState(readHrms);
+  const [annualTicket, setAnnualTicket] = useState(leaveTickets.annual);
+  const [sickTicket, setSickTicket] = useState(leaveTickets.sick);
   const [countries, setCountries] = useState<AvailableCountry[]>([]);
   const [countriesLoading, setCountriesLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -41,6 +43,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
     setAllowedComponents(components);
     setWorkingStatuses(statuses);
     setReadHrms(hrms);
+    setLeaveTickets({ annual: annualTicket, sick: sickTicket });
     const connected = await saveConfig({ domain });
     setSaving(false);
     if (connected) onClose();
@@ -156,6 +159,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
             Each scan reads your approved leave from hrms.gameloft.org (stay logged in there). Leave days get no rows; half days lower the target. Only dates, times, type and status are used.
           </p>
         </div>
+
+        <fieldset>
+          <legend className="field-label">Leave tickets</legend>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div>
+              <label htmlFor="settings-annual-ticket" className="text-xs text-[var(--text-subtle)]">Annual leave ticket</label>
+              <input id="settings-annual-ticket" type="text" className="field" placeholder="e.g. DESP-36823" value={annualTicket}
+                aria-describedby="settings-leave-help" onChange={(e) => setAnnualTicket(e.target.value)} />
+            </div>
+            <div>
+              <label htmlFor="settings-sick-ticket" className="text-xs text-[var(--text-subtle)]">Sick leave ticket</label>
+              <input id="settings-sick-ticket" type="text" className="field" placeholder="empty = off" value={sickTicket}
+                aria-describedby="settings-leave-help" onChange={(e) => setSickTicket(e.target.value)} />
+            </div>
+          </div>
+          <p id="settings-leave-help" className="mt-1 text-xs text-[var(--text-subtle)]">
+            Where your leave is logged. When set, each working day gets an "Add … leave" button. Time on these tickets counts as the leave itself, and they are allowed whatever their component.
+          </p>
+        </fieldset>
 
         <div>
           <label htmlFor="settings-country" className="field-label">Holiday country</label>

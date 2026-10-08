@@ -18,6 +18,7 @@
 - 🧩 **Allowed Components** — In Settings, list the Jira components you may log on (e.g. `DES-Systems, Anoman`; empty = all, case-insensitive). The scan makes new rows only for issues with one of them and lists the others as "outside allowed components"; Sync reads the issue's components first and refuses a row on any other issue, so nothing wrong reaches Jira. Time already logged elsewhere still counts toward the day.
 - 🕳️ **Empty Days Filled as Suggestions** — A working day with no ticket activity gets *Suggested* rows: first the tickets that were assigned to you and in a working status that day, else the tickets of the nearest earlier active day (up to 5 working days). Suggested rows are never part of a batch sync until you accept them.
 - 🏖️ **Leave from HRMS** — Each scan reads your approved, not-cancelled leave from Gameloft HRMS (`hrms.gameloft.org`, with your HRMS login; toggle in Settings). A full leave day gets no rows and is not "missing"; a partial day lowers that day's target (8h − 4h half day). Only dates, times, type and status are used — nothing else from HRMS is kept. If HRMS cannot be read, the scan continues and warns you.
+- 🎫 **Leave Tickets** — Optional "Annual leave ticket" and "Sick leave ticket" in Settings (empty = off). Each working day then has "Add annual leave" / "Add sick leave": a row on that ticket with the day's HRMS leave not yet logged (else the full daily target), text = the HRMS leave type. Time on a leave ticket counts as the leave itself, so 4h leave + 4h on the leave ticket + 4h work = 8h / 8h. Leave tickets are exempt from allowed components and never used for suggestions.
 - 🎯 **Daily Target Setting** — One target (default `8h`) in Settings, used by the scan, the day headers and the summary.
 - 📋 **Copy Row to Days** — Copy a row to several chosen days; days where that issue already has a row are skipped.
 - 💾 **Nothing Lost on Reload** — The workspace is saved in this browser on every change and restored on open. A row that was mid-sync at reload comes back as failed with "check Jira before retry", because it may already be posted.
@@ -74,7 +75,9 @@ Leave (HRMS, Settings "Read leave from HRMS", default on):
   ├── Counts records with status Approved and no cancellation date, any leave type
   ├── Each weekday from from_date to to_date: first day from from_time, last day until to_time, others
   │   08:00–17:00; minus the 12:00–13:00 lunch when covered; at most 8h
-  └── That day's target = daily target − leave; full leave → no rows, no suggestions, shown as "Leave"
+  ├── HRMS leave type containing "sick"/"sakit" → sick leave, any other type → annual leave
+  ├── Effective leave = HRMS leave − time already on your leave tickets that day (no double counting)
+  └── That day's target = daily target − effective leave; full leave → no rows, no suggestions, shown as "Leave"
 
 Empty working days (inside the range, not weekend/holiday/full leave, no row at all):
   ├── 1. In progress: tickets that at some moment that day were assigned to you AND in a working status

@@ -31,6 +31,8 @@ export interface DayGroupOptions {
   today: string;
   /** yyyy-MM-dd → minutes of approved leave */
   leave?: Map<string, number>;
+  /** Issue keys where leave is logged; time on them is the leave, not extra work */
+  leaveTickets?: string[];
 }
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -62,8 +64,14 @@ export function groupByDay(entries: WorklogEntry[], options: DayGroupOptions): D
       const weekend = isWeekend(day);
       const holidayName = options.holidays.get(date);
       const leaveMinutes = options.leave?.get(date) || 0;
+      // Leave already logged on a leave ticket is the leave itself: subtracting it from the target as well
+      // would count it twice (4h leave + 4h on the leave ticket + 4h work showed "4h over").
+      const onLeaveTickets = dayEntries
+        .filter(e => options.leaveTickets?.includes(e.issueKey))
+        .reduce((sum, e) => sum + entryMinutes(e), 0);
+      const unloggedLeave = Math.max(0, leaveMinutes - onLeaveTickets);
       // Leave hours are not owed: they come off the target, and a full leave day is off like a holiday.
-      const target = Math.max(0, options.targetMinutes - leaveMinutes);
+      const target = Math.max(0, options.targetMinutes - unloggedLeave);
       const off = weekend || holidayName !== undefined || target === 0;
       groups.push({
         date,

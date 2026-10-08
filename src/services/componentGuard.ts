@@ -10,12 +10,14 @@ export interface ComponentCheck {
  * Checks an issue's components right before a worklog is posted. Rows can come from a CSV or a typed key,
  * so the scan's filter alone cannot keep worklogs off other components. One lookup per issue per guard.
  */
-export function createComponentGuard(config: AuthConfig, allowedComponents: string[]) {
+export function createComponentGuard(config: AuthConfig, allowedComponents: string[], leaveTickets: string[] = []) {
   const allowed = new Set(allowedComponents.map(c => c.toLowerCase()));
+  // Leave must be logged on the leave tickets the user set, whatever component they are in.
+  const exempt = new Set(leaveTickets.map(k => k.toUpperCase()));
   const cache = new Map<string, Promise<ComponentCheck>>();
 
   return (issueKey: string): Promise<ComponentCheck> => {
-    if (allowed.size === 0) return Promise.resolve({ allowed: true, components: [] });
+    if (allowed.size === 0 || exempt.has(issueKey.toUpperCase())) return Promise.resolve({ allowed: true, components: [] });
     let check = cache.get(issueKey);
     if (!check) {
       check = jiraService.getIssueComponents(config, issueKey).then(components => ({

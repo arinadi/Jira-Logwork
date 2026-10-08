@@ -63,6 +63,10 @@ export const useCSV = () => {
   }, []);
 
   // The user reviewed the day's guesses: they become normal rows that a batch sync may post.
+  const addEntry = useCallback((entry: WorklogEntry) => {
+    setEntries(prev => [...prev, entry]);
+  }, []);
+
   const acceptSuggestions = useCallback((date: string) => {
     setEntries(prev => prev.map(e => (e.date === date && e.suggestion ? { ...e, suggestion: undefined } : e)));
   }, []);
@@ -94,6 +98,7 @@ export const useCSV = () => {
     removeEntry,
     copyEntryToDates,
     acceptSuggestions,
+    addEntry,
     clearEntries,
     addEntries,
     cancelMapping: () => {

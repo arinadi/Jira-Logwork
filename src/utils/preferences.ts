@@ -80,3 +80,22 @@ export function loadReadHrms(storage: Storage): boolean {
 export function saveReadHrms(storage: Storage, on: boolean): void {
   storage.setItem(READ_HRMS_STORAGE_KEY, on ? 'on' : 'off');
 }
+
+export const LEAVE_TICKETS_STORAGE_KEY = 'jira_logwork_leave_tickets';
+export interface LeaveTickets { annual: string; sick: string }
+
+const cleanKey = (key: unknown) => (typeof key === 'string' ? key.trim().toUpperCase() : '');
+
+/** Issue keys for logging leave; '' = not set, so the "Add … leave" buttons stay hidden. */
+export function loadLeaveTickets(storage: Storage): LeaveTickets {
+  try {
+    const saved = JSON.parse(storage.getItem(LEAVE_TICKETS_STORAGE_KEY) || '{}');
+    return { annual: cleanKey(saved.annual), sick: cleanKey(saved.sick) };
+  } catch {
+    return { annual: '', sick: '' };
+  }
+}
+
+export function saveLeaveTickets(storage: Storage, tickets: LeaveTickets): void {
+  storage.setItem(LEAVE_TICKETS_STORAGE_KEY, JSON.stringify({ annual: cleanKey(tickets.annual), sick: cleanKey(tickets.sick) }));
+}

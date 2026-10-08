@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { loadAllowedComponents, loadDailyTarget, loadReadHrms, loadTheme, loadWorkingStatuses, saveReadHrms, parseAllowedComponents, saveAllowedComponents, saveDailyTarget, saveTheme, saveWorkingStatuses } from './preferences';
+import { loadAllowedComponents, loadDailyTarget, loadLeaveTickets, loadReadHrms, saveLeaveTickets, loadTheme, loadWorkingStatuses, saveReadHrms, parseAllowedComponents, saveAllowedComponents, saveDailyTarget, saveTheme, saveWorkingStatuses } from './preferences';
 
 /** In-memory stand-in for window.localStorage. */
 function memoryStorage(): Storage {
@@ -79,6 +79,17 @@ describe('read leave from HRMS', () => {
     saveReadHrms(storage, false);
 
     expect(loadReadHrms(storage)).toBe(false);
+  });
+});
+
+describe('leave tickets', () => {
+  it('are empty (feature off) until set, and are saved trimmed and upper-case', () => {
+    const storage = memoryStorage();
+    expect(loadLeaveTickets(storage)).toEqual({ annual: '', sick: '' });
+
+    saveLeaveTickets(storage, { annual: ' desp-36823 ', sick: '' });
+
+    expect(loadLeaveTickets(storage)).toEqual({ annual: 'DESP-36823', sick: '' });
   });
 });
 

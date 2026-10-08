@@ -53,3 +53,26 @@ export function leaveMinutesByDay(records: HrmsLeaveRecord[]): Record<string, nu
   }
   return byDay;
 }
+
+export type LeaveKind = 'annual' | 'sick';
+
+/** Which leave ticket a type goes to: sick types to the sick ticket, everything else (annual, long service, …) to annual. */
+export function leaveKind(leaveType: string): LeaveKind {
+  return /sick|sakit/i.test(leaveType) ? 'sick' : 'annual';
+}
+
+/** Approved leave types per weekday, for the row text and for picking the leave ticket. */
+export function leaveTypesByDay(records: HrmsLeaveRecord[]): Record<string, string[]> {
+  const byDay: Record<string, string[]> = {};
+  for (const record of records) {
+    if (record.status !== 'Approved' || record.date_of_cancellation) continue;
+    for (const day of eachDayOfInterval({ start: parseISO(record.from_date), end: parseISO(record.to_date) })) {
+      if (isWeekend(day)) continue;
+      const date = format(day, 'yyyy-MM-dd');
+      const types = byDay[date] || [];
+      if (!types.includes(record.leave_type)) types.push(record.leave_type);
+      byDay[date] = types.sort();
+    }
+  }
+  return byDay;
+}
