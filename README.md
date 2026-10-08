@@ -10,21 +10,24 @@
 - 🔁 **Intelligent Duplicate Prevention** — Cross-references existing Jira worklogs before generating new ones. Already-logged entries are marked as "synced" and locked from re-upload.
 - ⏱️ **Auto Time Distribution** — Splits the hours still free in your daily target (default 8h, minus what you already logged that day) across the new tickets with activity on that day. 3 new tickets on an empty Monday? 2h 40m each, summing to exactly 8h.
 - 💬 **Comment-First Logging** — Uses your own Jira comment from that day as the worklog description. Falls back to your status transitions that day, then the issue summary. Never uses someone else's comment.
-- 📅 **Calendar-Aware Performance Tracker** — Shows all dates in your work range with:
-  - 🏛 **Public holiday detection** — Indonesia uses [libur.deno.dev](https://libur.deno.dev) (24 entries including Idul Fitri, Nyepi, Imlek, Idul Adha). Other countries use [Nager.at](https://date.nager.at) API.
-  - 📆 **Weekend highlighting** — Saturday/Sunday are dimmed with badges.
-  - 🟢 **Today indicator** — Current date highlighted with animated chip.
-  - 💜 **Overtime detection** — Work logged on holidays/weekends shown with violet bar.
-  - ⚠️ **Gap detection** — Hover over empty working days to see "No worklogs" hints.
+- 📅 **Day-Grouped Workspace** — Rows are grouped per calendar day, from the first to the last row date (empty working days included). Each day header shows `logged / target` and its state:
+  - ✅ **Met** — exactly the daily target. ⚠️ **Under** — shows the minutes missing. 🔴 **Over** — more than the target.
+  - 🏛 **Off** — weekend or public holiday; any work logged there counts as overtime. Indonesia uses [libur.deno.dev](https://libur.deno.dev) (Idul Fitri, Nyepi, Imlek, Idul Adha, …), other countries [Nager.at](https://date.nager.at).
+  - 🟢 **Today** — today's group is marked.
+  - A summary bar on top shows logged vs. target × working days for the whole range.
+- 🎯 **Daily Target Setting** — One target (default `8h`) in Settings, used by the scan, the day headers and the summary.
+- 📋 **Copy Row to Days** — Copy a row to several chosen days; days where that issue already has a row are skipped.
+- 💾 **Nothing Lost on Reload** — The workspace is saved in this browser on every change and restored on open. A row that was mid-sync at reload comes back as failed with "check Jira before retry", because it may already be posted.
 - 📦 **CSV Bulk Upload** — Import from any spreadsheet with intelligent fuzzy column mapping.
 - 🔒 **Zero-Trust Security** — No API token at all: the extension uses the Jira login you already have in Chrome. Calls go straight from your browser to your `*.atlassian.net` site; there is no proxy. A token saved by an older version is deleted on start.
-- 🌗 **Dark Mode** — Full Atlassian-inspired design with seamless light/dark transitions.
+- 🌗 **Dark Mode** — Compact Atlassian-style light/dark theme; your choice is remembered (default: system setting).
+- ♿ **Accessible** — Every icon button is labelled, everything works by keyboard, focus is always visible, zoom is allowed, and reduced motion is respected.
 
 ### 🔄 How It Works
 
 1. **Connect** — Log in to Jira in Chrome, then enter your Jira domain (`<site>.atlassian.net`). Only the domain is stored.
-2. **Fetch** — Write a JQL query, pick a date range. The Smart Fetch engine scans changelog, comments, and existing worklogs for each issue.
-3. **Review** — Edit generated entries in the spreadsheet grid. Watch the Performance tracker fill in real-time.
+2. **Fetch** — Pick a preset (This week / Last week / This month, weeks start Monday) or dates; the JQL is under *Advanced*. The Smart Fetch engine scans changelog, comments, and existing worklogs for each issue.
+3. **Review** — Edit rows inside their day group and watch each day header move to its target.
 4. **Sync** — Hit "Batch Sync". The engine uploads sequentially with rate-limit protection.
 
 ### 🧠 Smart Fetch: How Activity Becomes Worklogs

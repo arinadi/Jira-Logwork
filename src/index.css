@@ -1,100 +1,131 @@
 @import "tailwindcss";
 
+/* Compact Atlassian look: small radius, 14px base, 8/16px spacing, Atlassian design-token colors. */
 @theme {
-  --color-atlassian-blue: #0052cc;
-  --color-atlassian-blue-dark: #003e99;
+  --color-atlassian-blue: #0c66e4;
+  --color-atlassian-blue-dark: #0055cc;
   --color-atlassian-text: #172b4d;
-  --color-atlassian-text-subtle: #6b778c;
+  --color-atlassian-text-subtle: #44546f;
 }
 
 @layer base {
   :root {
-    --bg-main: #fcfdfe;
+    --bg-main: #f7f8f9;
     --bg-surface: #ffffff;
-    --bg-input: #f8fafc;
-    --border-color: rgba(226, 232, 240, 0.5); /* Softened border */
+    --bg-input: #f1f2f4;
+    --bg-hover: #ebecf0;
+    --border-color: #dcdfe4;
     --text-main: #172b4d;
-    --text-subtle: #6b778c;
-    transition: background-color 0.4s ease-out, color 0.4s ease-out;
+    /* #44546f on white is 7.6:1 — readable for the small labels this app uses a lot. */
+    --text-subtle: #44546f;
+    --focus-ring: #388bff;
+    --link: #0c66e4;
+    --ok: #216e4e;
+    --ok-bg: #dcfff1;
+    --warn: #7f5f01;
+    --warn-bg: #fff7d6;
+    --danger: #ae2e24;
+    --danger-bg: #ffeceb;
+    --off: #5e4db2;
+    --off-bg: #f3f0ff;
+    color-scheme: light;
   }
 
   :root.dark {
-    --bg-main: #020617;
-    --bg-surface: #0f172a;
-    --bg-input: #1e293b;
-    --border-color: rgba(30, 41, 59, 0.4); /* Softened border */
-    --text-main: #f1f5f9;
-    --text-subtle: #94a3b8;
+    --bg-main: #161a1d;
+    --bg-surface: #1d2125;
+    --bg-input: #22272b;
+    --bg-hover: #2c333a;
+    --border-color: #38414a;
+    --text-main: #dee4ea;
+    --text-subtle: #9fadbc;
+    --focus-ring: #85b8ff;
+    /* The light-theme blue is 3.1:1 on the dark surface (below AA 4.5:1); this one is 7.9:1. */
+    --link: #85b8ff;
+    --ok: #7ee2b8;
+    --ok-bg: #164b35;
+    --warn: #f8e6a0;
+    --warn-bg: #533f04;
+    --danger: #fd9891;
+    --danger-bg: #5d1f1a;
+    --off: #b8acf6;
+    --off-bg: #352c63;
+    color-scheme: dark;
+  }
+
+  html {
+    font-size: 14px;
   }
 
   body {
     @apply bg-[var(--bg-main)] text-[var(--text-main)] font-sans antialiased;
-    letter-spacing: -0.011em;
   }
 
   * {
     @apply border-[var(--border-color)];
-    transition: background-color 0.4s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* Keyboard users must always see where they are; mouse clicks do not show the ring. */
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
 
 @layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-[3px] text-sm font-medium
+           border border-transparent bg-[var(--bg-input)] text-[var(--text-main)]
+           hover:bg-[var(--bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors;
+  }
+
   .btn-primary {
-    @apply bg-atlassian-blue text-white px-6 py-2.5 rounded-xl font-semibold
-           hover:bg-atlassian-blue-dark active:scale-[0.98] transition-all duration-300
-           shadow-[0_8px_30px_rgb(0,82,204,0.12)] hover:shadow-[0_8px_30px_rgb(0,82,204,0.25)];
+    @apply inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-[3px] text-sm font-medium
+           bg-atlassian-blue text-white hover:bg-atlassian-blue-dark
+           disabled:opacity-50 disabled:cursor-not-allowed transition-colors;
   }
 
-  .glass-header {
-    @apply bg-[var(--bg-surface)] backdrop-blur-xl border-b border-[var(--border-color)];
+  .btn-subtle {
+    @apply inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-[3px] text-sm font-medium
+           bg-transparent text-[var(--text-subtle)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]
+           disabled:opacity-50 disabled:cursor-not-allowed transition-colors;
   }
 
-  .card-premium {
-    @apply bg-[var(--bg-surface)] rounded-[2rem] border border-[var(--border-color)] 
-           shadow-[0_1px_3px_rgba(0,0,0,0.02),0_10px_20px_-5px_rgba(0,0,0,0.04)] 
-           hover:shadow-[0_1px_3px_rgba(0,0,0,0.02),0_20px_40px_-10px_rgba(0,0,0,0.06)] 
-           transition-all duration-500 ease-out;
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-[3px] text-sm font-medium
+           bg-transparent text-[var(--danger)] hover:bg-[var(--danger-bg)]
+           disabled:opacity-50 disabled:cursor-not-allowed transition-colors;
   }
 
-  .text-pro-label {
-    @apply text-[10px] font-bold uppercase tracking-[0.15em] opacity-40;
+  .icon-btn {
+    @apply inline-flex items-center justify-center w-8 h-8 rounded-[3px] text-[var(--text-subtle)]
+           hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]
+           disabled:opacity-40 disabled:cursor-not-allowed transition-colors;
   }
-}
 
-/* Premium Animations */
-@keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-4px); }
-}
+  .card {
+    @apply bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-[3px];
+  }
 
-.animate-float {
-  animation: float 5s infinite ease-in-out;
-}
+  .field {
+    @apply w-full h-8 px-2 rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-surface)]
+           text-sm text-[var(--text-main)] hover:bg-[var(--bg-input)];
+  }
 
-@keyframes pulse-soft {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.85; transform: scale(0.99); }
-}
+  .field-label {
+    @apply block mb-1 text-xs font-semibold text-[var(--text-subtle)];
+  }
 
-.animate-pulse-soft {
-  animation: pulse-soft 3s infinite ease-in-out;
-}
-
-/* App Transition Fixes */
-.dark body {
-  color-scheme: dark;
-}
-
-/* Custom Scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-::-webkit-scrollbar-track {
-  @apply bg-transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  @apply bg-slate-400/10 rounded-full hover:bg-slate-400/20 transition-colors;
+  .lozenge {
+    /* Sentence case, not Atlassian's uppercase: these lozenges carry durations, and "2H 30M" reads badly. */
+    @apply inline-flex items-center gap-1 px-1 rounded-[3px] text-xs font-semibold leading-4 whitespace-nowrap;
+  }
 }

@@ -1,4 +1,4 @@
-import { addDays, format, parseISO, subDays } from 'date-fns';
+import { addDays, endOfWeek, format, parseISO, startOfMonth, startOfWeek, subDays, subWeeks } from 'date-fns';
 
 /**
  * Default date range of a history scan: the last 7 days up to today.
@@ -23,4 +23,22 @@ export function defaultScanJql(startDate: string, endDate: string): string {
   return `worklogAuthor = currentUser() AND worklogDate >= "${startDate}" AND worklogDate <= "${endDate}"`
     + ` OR status CHANGED BY currentUser() DURING ("${startDate}", "${dayAfterEnd}")`
     + ` OR watcher = currentUser() AND updated >= "${startDate}"`;
+}
+
+export type ScanPreset = 'thisWeek' | 'lastWeek' | 'thisMonth';
+
+/** Work weeks start on Monday (ISO); date-fns defaults to Sunday. Ranges end today, never in the future. */
+export function scanPresetRange(preset: ScanPreset, now: Date): { startDate: string; endDate: string } {
+  const day = (d: Date) => format(d, 'yyyy-MM-dd');
+  const monday = { weekStartsOn: 1 } as const;
+  switch (preset) {
+    case 'thisWeek':
+      return { startDate: day(startOfWeek(now, monday)), endDate: day(now) };
+    case 'lastWeek': {
+      const lastWeek = subWeeks(now, 1);
+      return { startDate: day(startOfWeek(lastWeek, monday)), endDate: day(endOfWeek(lastWeek, monday)) };
+    }
+    case 'thisMonth':
+      return { startDate: day(startOfMonth(now)), endDate: day(now) };
+  }
 }

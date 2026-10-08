@@ -1,74 +1,64 @@
 import React, { useState, useRef } from 'react';
-import { X, Search, Calendar, Loader2, Download, Table as TableIcon, Zap, RotateCcw } from 'lucide-react';
+import { Download, Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { usePreferences } from '../context/preferencesContext';
 import { jiraFetcher, type FetchParams, type ScanResult } from '../utils/jiraFetcher';
-import { defaultScanJql, defaultScanRange } from '../utils/scanDefaults';
+import { defaultScanJql, defaultScanRange, scanPresetRange, type ScanPreset } from '../utils/scanDefaults';
 import { csvExporter } from '../utils/csvExporter';
 import type { WorklogEntry } from '../types/worklog';
+import { Dialog } from './Dialog';
 
 interface JiraFetchDialogProps {
-  isOpen: boolean;
   onClose: () => void;
   onImport: (entries: WorklogEntry[]) => void;
 }
 
-const inputStyle: React.CSSProperties = {
-  backgroundColor: 'var(--bg-input)',
-  color: 'var(--text-main)',
-  borderColor: 'var(--border-color)',
-};
+const PRESETS: Array<{ id: ScanPreset; label: string }> = [
+  { id: 'thisWeek', label: 'This week' },
+  { id: 'lastWeek', label: 'Last week' },
+  { id: 'thisMonth', label: 'This month' },
+];
 
-const labelStyle: React.CSSProperties = {
-  color: 'var(--text-subtle)',
-};
-
-export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ isOpen, onClose, onImport }) => {
+export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ onClose, onImport }) => {
   const { config } = useAuth();
+  const { dailyTarget } = usePreferences();
   // Lazy init: the parent mounts this dialog on open, so "today" is the day the dialog is opened.
-  const [params, setParams] = useState<FetchParams>(() => {
-    const range = defaultScanRange(new Date());
-    return { ...range, jql: defaultScanJql(range.startDate, range.endDate), defaultTime: '8h' };
-  });
+  const [range, setRange] = useState(() => defaultScanRange(new Date()));
+  const [customJql, setCustomJql] = useState<string | null>(null);
+  // An edited JQL is the user's own query: date changes must not overwrite it, only "Reset" does.
+  const jql = customJql ?? defaultScanJql(range.startDate, range.endDate);
 
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0, message: '' });
   const [scan, setScan] = useState<ScanResult | null>(null);
-  const results: WorklogEntry[] | null = scan?.entries ?? null;
+  const [error, setError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Update JQL template when dates change
-  const handleParamChange = (key: keyof FetchParams, value: string) => {
-    setParams(prev => {
-      const next = { ...prev, [key]: value };
-      if (key === 'startDate' || key === 'endDate') {
-        next.jql = defaultScanJql(next.startDate, next.endDate);
-      }
-      return next;
-    });
-  };
-
   const handleFetch = async () => {
-    if (!config) return;
+    if (!config) {
+      setError('Connect to Jira in Settings first.');
+      return;
+    }
     setIsLoading(true);
     setScan(null);
-    setProgress({ current: 0, total: 0, message: 'Initializing scan...' });
-    
+    setError(null);
+    setProgress({ current: 0, total: 0, message: 'Starting scan…' });
+
     const controller = new AbortController();
     abortControllerRef.current = controller;
+    const params: FetchParams = { ...range, jql, defaultTime: dailyTarget };
 
     try {
       const scanResult = await jiraFetcher.fetchEvents(
-        config, 
-        params, 
-        (current, total, message) => {
-          setProgress({ current, total, message });
-        },
+        config,
+        params,
+        (current, total, message) => setProgress({ current, total, message }),
         controller.signal
       );
       setScan(scanResult);
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
-        alert('Error fetching Jira events. Check your JQL or connection.');
+        setError(`Scan failed: ${(err as Error).message}. Check the JQL and that you are logged in to Jira.`);
       }
     } finally {
       setIsLoading(false);
@@ -76,222 +66,123 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ isOpen, onClos
     }
   };
 
-  const handleCancel = () => {
-    if (abortControllerRef.current) {
-      setProgress(prev => ({ ...prev, message: 'Stopping scan... please wait.' }));
-      abortControllerRef.current.abort();
-    }
+  const handleStop = () => {
+    setProgress(prev => ({ ...prev, message: 'Stopping… partial results follow.' }));
+    abortControllerRef.current?.abort();
   };
 
-  if (!isOpen) return null;
+  const percent = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
+  const entries = scan?.entries ?? [];
+
+  const footer = isLoading ? (
+    <button type="button" className="btn-danger" onClick={handleStop}>Stop scan</button>
+  ) : scan ? (
+    <>
+      <button type="button" className="btn-subtle mr-auto" onClick={() => setScan(null)}>Change parameters</button>
+      <button
+        type="button"
+        className="btn"
+        disabled={entries.length === 0}
+        onClick={() => csvExporter.exportRawData(entries.map(r => ({ 'issue id': r.issueKey, date: r.date, hour: r.timeSpent, comment: r.comment })))}
+      >
+        <Download className="w-4 h-4" aria-hidden="true" /> Export CSV
+      </button>
+      <button type="button" className="btn-primary" disabled={entries.length === 0} onClick={() => { onImport(entries); onClose(); }}>
+        Add {entries.length} rows to workspace
+      </button>
+    </>
+  ) : (
+    <>
+      <button type="button" className="btn-subtle" onClick={onClose}>Cancel</button>
+      <button type="button" className="btn-primary" onClick={handleFetch}>Scan Jira</button>
+    </>
+  );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-md p-4 animate-in fade-in duration-500" style={{ backgroundColor: 'rgba(15, 23, 42, 0.5)' }}>
-      <div
-        className="rounded-[2.5rem] shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-700 border"
-        style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between p-8 border-b" style={{ borderColor: 'var(--border-color)' }}>
-          <div className="flex items-center gap-4">
-            <div className="p-3 rounded-2xl" style={{ backgroundColor: 'rgba(0, 82, 204, 0.1)', color: '#0052cc' }}>
-              <Zap className="w-5 h-5" />
+    <Dialog
+      title="Scan Jira history"
+      description={`Turns your worklogs, status changes and comments into rows. Daily target: ${dailyTarget} (change it in Settings).`}
+      onClose={onClose}
+      busy={isLoading}
+      width="max-w-xl"
+      footer={footer}
+    >
+      {error && <p role="alert" className="mb-3 px-2 py-1.5 rounded-[3px] text-sm bg-[var(--danger-bg)] text-[var(--danger)]">{error}</p>}
+
+      {isLoading && (
+        <div className="py-4 space-y-2">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> Scanning… {percent}%
+          </div>
+          <div
+            role="progressbar"
+            aria-label="Scan progress"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={percent}
+            className="h-1.5 rounded-full bg-[var(--bg-hover)] overflow-hidden"
+          >
+            <div className="h-full bg-atlassian-blue transition-[width]" style={{ width: `${percent}%` }} />
+          </div>
+          <p className="text-xs text-[var(--text-subtle)]" aria-live="polite">{progress.message}</p>
+        </div>
+      )}
+
+      {scan && !isLoading && (
+        <div className="space-y-2" aria-live="polite">
+          <p className="text-sm">
+            Found <strong>{entries.length}</strong> rows on <strong>{new Set(entries.map(r => r.issueKey)).size}</strong> issues
+            over <strong>{new Set(entries.map(r => r.date)).size}</strong> days.
+          </p>
+          {scan.failedIssues.length > 0 && (
+            <p role="alert" className="px-2 py-1.5 rounded-[3px] text-sm bg-[var(--danger-bg)] text-[var(--danger)]">
+              Partial result: could not read {scan.failedIssues.join(', ')}. Their activity is missing.
+            </p>
+          )}
+          {scan.fullDays.length > 0 && (
+            <p className="px-2 py-1.5 rounded-[3px] text-sm bg-[var(--bg-input)] text-[var(--text-subtle)]">
+              Already at target, no new rows: {scan.fullDays.join(', ')}.
+            </p>
+          )}
+        </div>
+      )}
+
+      {!scan && !isLoading && (
+        <div className="space-y-3">
+          <div role="group" aria-label="Date range presets" className="flex flex-wrap gap-1">
+            {PRESETS.map(p => {
+              const presetRange = scanPresetRange(p.id, new Date());
+              const active = presetRange.startDate === range.startDate && presetRange.endDate === range.endDate;
+              return (
+                <button key={p.id} type="button" className={active ? 'btn-primary' : 'btn'} aria-pressed={active} onClick={() => setRange(presetRange)}>
+                  {p.label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="scan-start" className="field-label">Start date</label>
+              <input id="scan-start" type="date" className="field" value={range.startDate} max={range.endDate}
+                onChange={(e) => setRange(prev => ({ ...prev, startDate: e.target.value }))} />
             </div>
             <div>
-              <h2 className="text-2xl font-semibold tracking-tight" style={{ color: 'var(--text-main)' }}>Jira History Scanner</h2>
-              <p className="text-[10px] font-bold uppercase tracking-[0.15em]" style={{ color: 'var(--text-subtle)', opacity: 0.5 }}>Auto-Log from status changes</p>
+              <label htmlFor="scan-end" className="field-label">End date</label>
+              <input id="scan-end" type="date" className="field" value={range.endDate} min={range.startDate}
+                onChange={(e) => setRange(prev => ({ ...prev, endDate: e.target.value }))} />
             </div>
           </div>
-          <button onClick={onClose} className="p-2.5 rounded-2xl transition-all active:scale-90 hover:opacity-70" style={{ color: 'var(--text-subtle)' }}>
-            <X className="w-6 h-6" />
-          </button>
+          <details className="rounded-[3px] border px-2 py-1.5">
+            <summary className="cursor-pointer text-sm font-medium">Advanced: JQL{customJql !== null && ' (edited)'}</summary>
+            <label htmlFor="scan-jql" className="field-label mt-2">Issues to scan</label>
+            <textarea id="scan-jql" className="field h-auto min-h-24 py-1 font-mono text-xs leading-relaxed" value={jql}
+              onChange={(e) => setCustomJql(e.target.value)} />
+            {customJql !== null && (
+              <button type="button" className="btn-subtle mt-1" onClick={() => setCustomJql(null)}>Reset to default JQL</button>
+            )}
+          </details>
         </div>
-
-        {/* Form */}
-        <div className="p-8 space-y-8">
-          {!results && !isLoading && (
-            <div className="grid grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-[0.15em] pl-1" style={labelStyle}>Start Date</label>
-                <div className="relative group">
-                  <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: '#0052cc' }} />
-                  <input
-                    type="date"
-                    className="w-full pl-12 pr-4 py-3.5 border rounded-2xl text-sm font-semibold focus:ring-2 focus:ring-atlassian-blue/20 outline-none transition-all"
-                    style={inputStyle}
-                    value={params.startDate}
-                    onChange={(e) => handleParamChange('startDate', e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-[0.15em] pl-1" style={labelStyle}>End Date</label>
-                <div className="relative group">
-                  <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: '#0052cc' }} />
-                  <input
-                    type="date"
-                    className="w-full pl-12 pr-4 py-3.5 border rounded-2xl text-sm font-semibold focus:ring-2 focus:ring-atlassian-blue/20 outline-none transition-all"
-                    style={inputStyle}
-                    value={params.endDate}
-                    onChange={(e) => handleParamChange('endDate', e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="col-span-2 space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-[0.15em] pl-1" style={labelStyle}>JQL Search Query</label>
-                <div className="relative group">
-                  <Search className="absolute left-4 top-4 w-4 h-4" style={{ color: 'var(--text-subtle)' }} />
-                  <textarea
-                    className="w-full pl-12 pr-4 py-4 border rounded-2xl text-sm font-medium focus:ring-2 focus:ring-atlassian-blue/20 outline-none transition-all min-h-[100px] leading-relaxed"
-                    style={inputStyle}
-                    value={params.jql}
-                    onChange={(e) => setParams({ ...params, jql: e.target.value })}
-                    placeholder="status CHANGED BY..."
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-[0.15em] pl-1" style={labelStyle}>Default Log Hours</label>
-                <input
-                  type="text"
-                  className="w-full px-5 py-3.5 border rounded-2xl text-sm font-semibold focus:ring-2 focus:ring-atlassian-blue/20 outline-none transition-all"
-                  style={inputStyle}
-                  value={params.defaultTime}
-                  onChange={(e) => setParams({ ...params, defaultTime: e.target.value })}
-                  placeholder="8h"
-                />
-              </div>
-            </div>
-          )}
-
-          {isLoading && (
-            <div className="py-16 flex flex-col items-center justify-center text-center space-y-8">
-              <div className="relative w-32 h-32">
-                <Loader2 className="w-full h-full text-atlassian-blue animate-spin opacity-20" />
-                <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-2xl font-semibold text-atlassian-blue tracking-tight">
-                    {progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0}%
-                  </span>
-                  <span className="text-[10px] font-bold uppercase tracking-[0.15em]" style={{ color: 'var(--text-subtle)', opacity: 0.5 }}>Scanning</span>
-                </div>
-              </div>
-              <div className="space-y-3">
-                <p className="font-semibold text-2xl tracking-tight" style={{ color: 'var(--text-main)' }}>Processing your history...</p>
-                <p className="text-sm font-medium italic px-10" style={{ color: 'var(--text-subtle)', opacity: 0.6 }}>{progress.message}</p>
-              </div>
-              <div className="w-full max-w-md h-3 rounded-full overflow-hidden shadow-inner" style={{ backgroundColor: 'var(--bg-input)' }}>
-                <div
-                  className="h-full bg-atlassian-blue rounded-full transition-all duration-700"
-                  style={{ width: `${progress.total > 0 ? (progress.current / progress.total) * 100 : 0}%`, boxShadow: '0 0 15px rgba(0,82,204,0.3)' }}
-                />
-              </div>
-
-              <button
-                onClick={handleCancel}
-                className="mt-6 px-10 py-3 rounded-2xl border border-red-500/20 text-red-500 font-semibold hover:bg-red-500/5 transition-all active:scale-95 flex items-center gap-2"
-              >
-                <X className="w-4 h-4" />
-                Stop Scan
-              </button>
-            </div>
-          )}
-
-          {results && (
-            <div className="py-10 flex flex-col items-center justify-center text-center space-y-10 animate-in fade-in zoom-in duration-700">
-              <div className="w-24 h-24 text-emerald-500 rounded-[2rem] flex items-center justify-center shadow-xl animate-float border" style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-color)' }}>
-                <Search className="w-10 h-10" />
-              </div>
-              <div className="space-y-3">
-                <h3 className="text-4xl font-semibold tracking-tight" style={{ color: 'var(--text-main)' }}>{results.length} Entries Discovered</h3>
-                <p className="font-medium text-lg max-w-sm mx-auto" style={{ color: 'var(--text-subtle)', opacity: 0.7 }}>We analyzed your history and generated {results.length} smart worklogs.</p>
-                {scan && scan.failedIssues.length > 0 && (
-                  <p role="alert" className="text-sm font-medium text-red-500 max-w-md mx-auto">
-                    Partial result: could not read {scan.failedIssues.join(', ')}. Their activity is missing.
-                  </p>
-                )}
-                {scan && scan.fullDays.length > 0 && (
-                  <p className="text-sm font-medium max-w-md mx-auto" style={{ color: 'var(--text-subtle)' }}>
-                    Already at target, no new rows: {scan.fullDays.join(', ')}.
-                  </p>
-                )}
-              </div>
-
-              <div className="flex gap-4 w-full max-w-lg mx-auto">
-                <div className="flex-1 p-4 rounded-2xl border" style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-color)' }}>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-[#0052cc] mb-1">Tickets</p>
-                  <p className="text-2xl font-bold" style={{ color: 'var(--text-main)' }}>{new Set(results.map(r => r.issueKey)).size}</p>
-                </div>
-                <div className="flex-1 p-4 rounded-2xl border" style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-color)' }}>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-[#0052cc] mb-1">Days</p>
-                  <p className="text-2xl font-bold" style={{ color: 'var(--text-main)' }}>{new Set(results.map(r => r.date)).size}</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-6 w-full max-w-lg mx-auto">
-                <button
-                  onClick={() => {
-                    csvExporter.exportRawData(results.map(r => ({
-                      'issue id': r.issueKey,
-                      date: r.date,
-                      hour: r.timeSpent,
-                      comment: r.comment
-                    })));
-                  }}
-                  className="flex flex-col items-center gap-4 p-8 rounded-[2rem] border hover:shadow-xl transition-all duration-500 group active:scale-95"
-                  style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
-                >
-                  <div className="p-3 rounded-xl transition-colors" style={{ backgroundColor: 'var(--bg-input)' }}>
-                    <Download className="w-6 h-6 group-hover:-translate-y-1 transition-transform" style={{ color: 'var(--text-subtle)' }} />
-                  </div>
-                  <span className="font-semibold" style={{ color: 'var(--text-subtle)' }}>Export CSV</span>
-                </button>
-                <button
-                  onClick={() => {
-                    onImport(results);
-                    onClose();
-                  }}
-                  className="flex flex-col items-center gap-4 p-8 rounded-[2rem] border border-atlassian-blue/20 bg-atlassian-blue/5 hover:bg-atlassian-blue hover:text-white transition-all duration-500 group shadow-lg shadow-atlassian-blue/5 active:scale-95"
-                >
-                  <div className="p-3 bg-atlassian-blue rounded-xl group-hover:bg-white group-hover:text-atlassian-blue transition-colors">
-                    <TableIcon className="w-6 h-6 group-hover:scale-110 transition-transform" />
-                  </div>
-                  <span className="font-semibold group-hover:text-white transition-colors">Import to Workspace</span>
-                </button>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  onClick={() => setScan(null)}
-                  className="flex items-center gap-2 px-6 py-2.5 rounded-xl font-medium transition-colors hover:bg-black/5 dark:hover:bg-white/5 active:scale-95"
-                  style={{ color: 'var(--text-subtle)' }}
-                >
-                  <RotateCcw className="w-4 h-4" />
-                  Change Parameters
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        {!isLoading && !results && (
-          <div className="p-4 border-t flex justify-end gap-4" style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-color)' }}>
-            <button
-              onClick={onClose}
-              className="px-8 py-3 font-semibold transition-colors hover:opacity-80"
-              style={{ color: 'var(--text-subtle)' }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleFetch}
-              className="px-10 py-3 bg-atlassian-blue text-white rounded-[1.25rem] font-semibold hover:bg-atlassian-blue-dark shadow-xl shadow-atlassian-blue/20 transition-all active:scale-95"
-            >
-              Start Automated Scan
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
+      )}
+    </Dialog>
   );
 };

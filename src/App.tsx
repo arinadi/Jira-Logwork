@@ -1,291 +1,165 @@
-import { AuthProvider } from './context/AuthContext';
+import { useEffect, useId, useMemo, useState } from 'react';
+import { format, parseISO } from 'date-fns';
+import { Loader2, Moon, Play, Search, Sun, Upload } from 'lucide-react';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { PreferencesProvider } from './context/PreferencesProvider';
+import { usePreferences } from './context/preferencesContext';
 import { AuthPanel } from './components/AuthPanel';
-import { Layout, Play, Loader2, Moon, Sun, BarChart3, Upload, Zap } from 'lucide-react';
 import { Uploader } from './components/Uploader';
 import { MappingDialog } from './components/MappingDialog';
-import { WorklogTable } from './components/WorklogTable';
-import { DailyCapacityTracker } from './components/DailyCapacityTracker';
+import { DayGroupList } from './components/DayGroupList';
 import { SummaryDashboard } from './components/SummaryDashboard';
 import { JiraFetchDialog } from './components/JiraFetchDialog';
 import { useCSV } from './hooks/useCSV';
 import { useSync } from './hooks/useSync';
-import { useState, useEffect } from 'react';
+import { useHolidays } from './hooks/useHolidays';
+import { formatMinutes, groupByDay, rangeSummary } from './utils/dayGroups';
+import { loadTheme, saveTheme, type Theme } from './utils/preferences';
+import { validateEntry } from './utils/validation';
 
 function AppContent() {
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const csvInputId = useId();
+  const [theme, setTheme] = useState<Theme>(() => loadTheme(localStorage, window.matchMedia('(prefers-color-scheme: dark)').matches));
   const [showSummary, setShowSummary] = useState(false);
   const [showFetchDialog, setShowFetchDialog] = useState(false);
+  const { config } = useAuth();
+  const { dailyTargetMinutes, holidayCountry } = usePreferences();
 
-  const { 
-    entries, 
-    isMapping, 
-    pendingData, 
-    importFile, 
-    applyMapping, 
-    updateEntry,
-    removeEntry, 
-    cloneEntry,
-    clearEntries,
-    addEntries,
-    cancelMapping 
+  const {
+    entries, isMapping, pendingData, importFile, applyMapping, updateEntry, removeEntry,
+    copyEntryToDates, clearEntries, addEntries, cancelMapping,
   } = useCSV();
+  const { syncSingleEntry, syncAllValid, isSyncing, progress } = useSync(entries, updateEntry);
 
-  const { 
-    syncSingleEntry, 
-    syncAllValid, 
-    isSyncing, 
-    progress 
-  } = useSync(entries, updateEntry);
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+  }, [theme]);
 
-  const readyEntries = entries.filter(e => e.status === 'ready');
-  const readyCount = readyEntries.length;
-  const errorCount = entries.filter(e => ['failed', 'error'].includes(e.status)).length;
+  const toggleTheme = () => {
+    const next: Theme = theme === 'dark' ? 'light' : 'dark';
+    saveTheme(localStorage, next);
+    setTheme(next);
+  };
+
+  const years = useMemo(() => {
+    const set = new Set(entries.map(e => Number(e.date.slice(0, 4))).filter(y => y > 1900));
+    return Array.from(set).sort();
+  }, [entries]);
+  const holidays = useHolidays(years, holidayCountry);
+  const groups = useMemo(
+    () => groupByDay(entries, { targetMinutes: dailyTargetMinutes, holidays, today: format(new Date(), 'yyyy-MM-dd') }),
+    [entries, dailyTargetMinutes, holidays]
+  );
+  const summary = rangeSummary(groups, dailyTargetMinutes);
+  const dated = groups.filter(g => g.date !== '');
+
+  const readyValid = entries.filter(e => e.status === 'ready' && Object.keys(validateEntry(e)).length === 0).length;
   const syncedCount = entries.filter(e => e.status === 'synced').length;
+  const failedCount = entries.filter(e => e.status === 'failed' || e.status === 'error').length;
 
-  // Sync completion side effect
-  useEffect(() => {
-    if (!isSyncing && progress.total > 0 && progress.current === progress.total) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setShowSummary(true);
-    }
-  }, [isSyncing, progress]);
+  const handleSyncAll = async () => {
+    await syncAllValid();
+    setShowSummary(true);
+  };
 
-  // Dark mode side effect
-  useEffect(() => {
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [isDarkMode]);
+  const summaryPercent = summary.targetMinutes > 0 ? Math.min(100, (summary.loggedMinutes / summary.targetMinutes) * 100) : 0;
 
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--bg-main)] transition-colors duration-500">
-      {/* Header */}
-      <header className="glass-header px-8 py-4 flex items-center justify-between sticky top-0 z-40">
-        <div className="flex items-center gap-4">
-          <div className="bg-atlassian-blue p-2.5 rounded-2xl shadow-xl shadow-atlassian-blue/15 animate-float">
-            <Layout className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <h1 className="text-xl font-semibold text-[var(--text-main)] leading-tight tracking-tight">Jira Logwork</h1>
-            <p className="text-pro-label">Chrome extension</p>
-          </div>
-        </div>
-        
-        <div className="flex items-center gap-5">
-          <button 
-            onClick={() => setIsDarkMode(!isDarkMode)}
-            className="p-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-all text-[var(--text-subtle)] active:scale-90"
-          >
-            {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+    <div className="min-h-screen flex flex-col">
+      <header className="sticky top-0 z-40 bg-[var(--bg-surface)] border-b">
+        <div className="max-w-6xl mx-auto px-4 h-14 flex items-center gap-2">
+          <h1 className="text-base font-semibold mr-auto">Jira Logwork</h1>
+          <button type="button" className="btn-primary" onClick={() => setShowFetchDialog(true)}>
+            <Search className="w-4 h-4" aria-hidden="true" /><span className="hidden sm:inline">Scan Jira</span><span className="sr-only sm:hidden">Scan Jira</span>
           </button>
-          <div className="w-px h-8 bg-[var(--border-color)]"></div>
+          <label htmlFor={csvInputId} className="btn cursor-pointer">
+            <Upload className="w-4 h-4" aria-hidden="true" /><span className="hidden sm:inline">Import CSV</span><span className="sr-only sm:hidden">Import CSV</span>
+          </label>
+          <input
+            id={csvInputId}
+            type="file"
+            accept=".csv,text/csv"
+            className="sr-only"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) importFile(f); e.target.value = ''; }}
+          />
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={toggleTheme}
+            aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          >
+            {theme === 'dark' ? <Sun className="w-4 h-4" aria-hidden="true" /> : <Moon className="w-4 h-4" aria-hidden="true" />}
+          </button>
           <AuthPanel />
         </div>
       </header>
 
-      {/* Main Content Area */}
-      <main className="flex-1 flex max-w-[1600px] mx-auto w-full p-8 gap-8">
-        {/* Table Area */}
-        <div className="flex-1 flex flex-col gap-8">
-          {entries.length > 0 && (
-            <div className="flex items-center justify-between card-premium p-5 animate-in fade-in slide-in-from-top-4 duration-700">
-              <div className="flex gap-3">
-                <button 
-                  onClick={() => setShowSummary(true)}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-2xl text-sm font-semibold text-[var(--text-main)] hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all shadow-sm active:scale-95"
-                >
-                  <BarChart3 className="w-4 h-4 text-atlassian-blue" />
-                  Analytics
-                </button>
-                <button 
-                  onClick={() => setShowFetchDialog(true)}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-atlassian-blue/5 border border-atlassian-blue/10 rounded-2xl text-sm font-semibold text-atlassian-blue hover:bg-atlassian-blue hover:text-white transition-all shadow-sm active:scale-95"
-                >
-                  <Zap className="w-4 h-4" />
-                  Fetch History
-                </button>
-              </div>
-              
-              <div className="flex items-center gap-8">
-                <div className="flex gap-10 pr-10 border-r border-[var(--border-color)]">
-                  <div className="text-center group">
-                    <p className="text-pro-label mb-1">Ready</p>
-                    <p className="text-2xl font-semibold text-atlassian-blue group-hover:scale-110 transition-transform">{readyCount}</p>
-                  </div>
-                  <div className="text-center group">
-                    <p className="text-pro-label mb-1 text-emerald-500">Synced</p>
-                    <p className="text-2xl font-semibold text-emerald-500 group-hover:scale-110 transition-transform">{syncedCount}</p>
-                  </div>
-                  <div className="text-center group">
-                    <p className="text-pro-label mb-1 text-red-500">Errors</p>
-                    <p className="text-2xl font-semibold text-red-500 group-hover:scale-110 transition-transform">{errorCount}</p>
-                  </div>
-                </div>
-                
-                <div className="flex gap-4">
-                  <button 
-                    onClick={clearEntries}
-                    className="px-6 py-2.5 rounded-2xl text-sm font-semibold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 transition-all active:scale-95"
-                  >
-                    Clear Workspace
-                  </button>
-                  <button 
-                    onClick={syncAllValid}
-                    disabled={isSyncing || readyCount === 0}
-                    className={`btn-primary flex items-center gap-2 group relative overflow-hidden ${isSyncing ? 'pr-20' : ''}`}
-                  >
-                    {isSyncing ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Syncing...
-                        <span className="absolute right-0 top-0 bottom-0 bg-white/20 px-4 flex items-center justify-center font-mono text-xs">
-                          {progress.current}/{progress.total}
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-4 h-4" fill="currentColor" /> 
-                        Batch Sync
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
+      <main className="flex-1 w-full max-w-6xl mx-auto px-4 py-4 space-y-3">
+        {entries.length === 0 ? (
+          <div className="space-y-3">
+            <div className="card p-6 text-center">
+              <h2 className="text-lg font-semibold">No worklogs yet</h2>
+              <p className="mt-1 text-sm text-[var(--text-subtle)] max-w-md mx-auto">
+                Scan your Jira activity for a date range, or import a CSV. Rows are kept in this browser until you clear them.
+              </p>
+              <button type="button" className="btn-primary mt-3" onClick={() => setShowFetchDialog(true)}>
+                <Search className="w-4 h-4" aria-hidden="true" /> Scan Jira history
+              </button>
             </div>
-          )}
-
-          {entries.length > 0 ? (
-            <div className="flex flex-col gap-8 overflow-hidden">
-              <div className="flex-1 overflow-auto rounded-[2rem] border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-2xl shadow-black/[0.02]">
-                <WorklogTable 
-                  entries={entries} 
-                  onUpdate={updateEntry}
-                  onRemove={removeEntry} 
-                  onClone={cloneEntry}
-                  onClearAll={clearEntries}
-                  onSyncRow={syncSingleEntry}
-                />
-              </div>
-              
-              {/* Secondary Dropzone */}
-              <div className="group relative border-2 border-dashed border-[var(--border-color)] rounded-[2rem] p-12 hover:border-atlassian-blue/30 hover:bg-atlassian-blue/[0.01] transition-all flex flex-col items-center justify-center text-center">
-                <div className="w-14 h-14 rounded-2xl bg-slate-50 dark:bg-slate-800/50 flex items-center justify-center mb-4 group-hover:scale-110 group-hover:rotate-6 transition-all duration-500">
-                  <Upload className="w-7 h-7 text-slate-300 group-hover:text-atlassian-blue" />
-                </div>
-                <p className="text-[var(--text-main)] font-semibold text-base">
-                  Append more logs by dropping a CSV here
-                </p>
-                <p className="text-xs text-[var(--text-subtle)] mt-2 opacity-60">
-                  Or use the <span className="font-bold text-atlassian-blue">"Fetch History"</span> button above for automation.
-                </p>
-                <input 
-                  type="file" 
-                  accept=".csv" 
-                  className="absolute inset-0 opacity-0 cursor-pointer" 
-                  onChange={(e) => e.target.files?.[0] && importFile(e.target.files[0])}
-                />
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-10">
-               <div className="card-premium p-12 text-center group cursor-pointer hover:border-atlassian-blue/30 transition-all duration-500" onClick={() => setShowFetchDialog(true)}>
-                <div className="w-24 h-24 bg-atlassian-blue/5 text-atlassian-blue rounded-[2rem] flex items-center justify-center mx-auto mb-8 group-hover:scale-110 group-hover:bg-atlassian-blue group-hover:text-white transition-all duration-700 shadow-xl shadow-atlassian-blue/5 border border-atlassian-blue/10">
-                  <Zap className="w-10 h-10" />
-                </div>
-                <h3 className="text-3xl font-semibold text-[var(--text-main)] mb-3 tracking-tight">Fetch From Jira History</h3>
-                <p className="text-[var(--text-subtle)] max-w-sm mx-auto font-medium text-base leading-relaxed">
-                  Automatically generate worklogs by scanning your issue activity from a date range.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-6 py-4">
-                <div className="h-px flex-1 bg-[var(--border-color)]"></div>
-                <p className="text-pro-label">Or import manually</p>
-                <div className="h-px flex-1 bg-[var(--border-color)]"></div>
-              </div>
-
-              <Uploader onFileSelect={importFile} />
-            </div>
-          )}
-        </div>
-
-        {/* Sidebar - Capacity Tracker */}
-        <aside className="w-96 flex flex-col gap-8 pb-8">
-          <div 
-            className="card-premium p-8 sticky top-28 overflow-hidden flex flex-col"
-            style={{ maxHeight: 'calc(100vh - 140px)' }}
-          >
-             {/* Gradient Accent */}
-            <div className="absolute top-0 right-0 w-48 h-48 bg-atlassian-blue/[0.03] rounded-full blur-[80px] -mr-24 -mt-24"></div>
-            
-            <div className="relative z-10 shrink-0">
-              <h2 className="text-2xl font-semibold text-[var(--text-main)] mb-1 flex items-center gap-2">
-                Performance
-              </h2>
-              <p className="text-pro-label mb-10">Daily Target: 8.0 Hours</p>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto pr-2 relative z-10 custom-scrollbar">
-              <DailyCapacityTracker entries={entries} />
-            </div>
+            <Uploader onFileSelect={importFile} />
           </div>
-          
-          {isSyncing && (
-            <div className="bg-atlassian-blue rounded-[2.5rem] shadow-2xl p-8 animate-in slide-in-from-right-12 duration-700 shadow-atlassian-blue/20">
-              <h3 className="text-base font-semibold text-white flex items-center gap-3 mb-6">
-                <Loader2 className="w-5 h-5 animate-spin" /> Batch Sync Active
-              </h3>
-              <div className="space-y-6">
-                <div className="flex justify-between text-xs font-bold text-white/90 uppercase tracking-widest pl-1">
-                  <span>Progress State</span>
-                  <span className="font-mono text-sm">{Math.round((progress.current / progress.total) * 100)}%</span>
-                </div>
-                <div className="h-3 w-full bg-white/20 rounded-full overflow-hidden shadow-inner">
-                  <div 
-                    className="h-full bg-white transition-all duration-1000 cubic-bezier(0.16, 1, 0.3, 1) shadow-[0_0_20px_rgba(255,255,255,0.6)]"
-                    style={{ width: `${(progress.current / progress.total) * 100}%` }}
-                  />
-                </div>
-                <div className="flex gap-3 bg-white/10 p-4 rounded-2xl items-start">
-                  <div className="bg-white/20 p-1.5 rounded-lg shrink-0 mt-0.5">
-                    <Zap className="w-3 h-3 text-white" />
-                  </div>
-                  <p className="text-[11px] text-blue-50 font-medium leading-relaxed italic">
-                    Sequencing logs with 1s cooldown to protect Jira API rate limits.
-                  </p>
-                </div>
+        ) : (
+          <>
+            <section aria-label="Range summary" className="card p-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+              <div className="min-w-0">
+                <p className="text-xs text-[var(--text-subtle)]">
+                  {dated.length > 0
+                    ? `${format(parseISO(dated[0].date), 'dd MMM')} – ${format(parseISO(dated[dated.length - 1].date), 'dd MMM yyyy')} · ${summary.workingDays} working days`
+                    : 'No dated rows'}
+                </p>
+                <p className="text-sm font-semibold tabular-nums">
+                  {formatMinutes(summary.loggedMinutes)} <span className="font-normal text-[var(--text-subtle)]">/ {formatMinutes(summary.targetMinutes)} target</span>
+                </p>
               </div>
-            </div>
-          )}
-        </aside>
+              <div className="hidden sm:block w-40 h-1.5 rounded-full bg-[var(--bg-hover)] overflow-hidden" aria-hidden="true">
+                <div className="h-full bg-atlassian-blue" style={{ width: `${summaryPercent}%` }} />
+              </div>
+              <p className="text-sm text-[var(--text-subtle)]">
+                <span className="font-medium text-[var(--text-main)]">{readyValid}</span> ready ·{' '}
+                <span className="font-medium text-[var(--ok)]">{syncedCount}</span> synced ·{' '}
+                <span className="font-medium text-[var(--danger)]">{failedCount}</span> failed
+              </p>
+              <div className="flex items-center gap-2 ml-auto">
+                <button type="button" className="btn-danger" onClick={clearEntries} disabled={isSyncing}>Clear workspace</button>
+                <button type="button" className="btn-primary" onClick={handleSyncAll} disabled={isSyncing || readyValid === 0}>
+                  {isSyncing
+                    ? <><Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> Syncing {progress.current}/{progress.total}</>
+                    : <><Play className="w-4 h-4" aria-hidden="true" /> Sync {readyValid} to Jira</>}
+                </button>
+              </div>
+              {/* Announce batch progress without moving focus. */}
+              <p className="sr-only" aria-live="polite">{isSyncing ? `Syncing ${progress.current} of ${progress.total}` : ''}</p>
+            </section>
+
+            <DayGroupList
+              groups={groups}
+              targetMinutes={dailyTargetMinutes}
+              jiraDomain={config?.domain}
+              onUpdate={updateEntry}
+              onRemove={removeEntry}
+              onCopyToDays={copyEntryToDates}
+              onSyncRow={syncSingleEntry}
+            />
+          </>
+        )}
       </main>
 
-      <MappingDialog 
-        isOpen={isMapping}
-        headers={pendingData?.headers || []}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        initialMapping={{} as any}
-        onConfirm={applyMapping}
-        onCancel={cancelMapping}
-      />
-
-      {showSummary && (
-        <SummaryDashboard 
-          entries={entries} 
-          onClose={() => setShowSummary(false)} 
-        />
+      {isMapping && pendingData && (
+        <MappingDialog headers={pendingData.headers} onConfirm={applyMapping} onCancel={cancelMapping} />
       )}
-
+      {showSummary && <SummaryDashboard entries={entries} onClose={() => setShowSummary(false)} />}
       {/* Mounted only while open, so its date defaults are taken at open time */}
-      {showFetchDialog && (
-        <JiraFetchDialog 
-          isOpen={showFetchDialog}
-          onClose={() => setShowFetchDialog(false)}
-          onImport={addEntries}
-        />
-      )}
+      {showFetchDialog && <JiraFetchDialog onClose={() => setShowFetchDialog(false)} onImport={addEntries} />}
     </div>
   );
 }
@@ -293,7 +167,9 @@ function AppContent() {
 function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <PreferencesProvider>
+        <AppContent />
+      </PreferencesProvider>
     </AuthProvider>
   );
 }

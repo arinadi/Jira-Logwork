@@ -1,13 +1,19 @@
-import { useState, useCallback } from 'react';
-import { parseISO, addDays, format } from 'date-fns';
+import { useState, useCallback, useEffect } from 'react';
 import type { WorklogEntry, FieldMapping } from '../types/worklog';
 import { csvParser } from '../utils/csvParser';
 import { mergeFetchedEntries } from '../utils/mergeEntries';
+import { copyEntryToDays } from '../utils/copyEntry';
+import { loadWorkspace, saveWorkspace } from '../utils/workspaceStorage';
 
 export const useCSV = () => {
-  const [entries, setEntries] = useState<WorklogEntry[]>([]);
+  const [entries, setEntries] = useState<WorklogEntry[]>(() => loadWorkspace(localStorage));
   const [isMapping, setIsMapping] = useState(false);
   const [pendingData, setPendingData] = useState<{ headers: string[], rows: string[][] } | null>(null);
+
+  // Every change is written through, so a reload or a closed tab never loses unsynced rows.
+  useEffect(() => {
+    saveWorkspace(localStorage, entries);
+  }, [entries]);
 
   const importFile = useCallback(async (file: File) => {
     const result = await csvParser.parseFile(file);
@@ -56,34 +62,10 @@ export const useCSV = () => {
     setEntries(prev => prev.filter(e => e.id !== id));
   }, []);
 
-  const cloneEntry = useCallback((id: string) => {
+  const copyEntryToDates = useCallback((id: string, dates: string[]) => {
     setEntries(prev => {
       const entry = prev.find(e => e.id === id);
-      if (!entry) return prev;
-
-      let nextDateStr = entry.date;
-      try {
-        const date = parseISO(entry.date);
-        const nextDate = addDays(date, 1);
-        nextDateStr = format(nextDate, 'yyyy-MM-dd');
-      } catch {
-        console.warn('Failed to parse date for cloning:', entry.date);
-      }
-      
-      const newEntry: WorklogEntry = {
-        ...entry,
-        id: crypto.randomUUID(),
-        date: nextDateStr,
-        timeSpent: '8h',
-        comment: entry.comment,
-        status: 'ready',
-        originalRowIndex: prev.length,
-      };
-
-      const index = prev.findIndex(e => e.id === id);
-      const nextEntries = [...prev];
-      nextEntries.splice(index + 1, 0, newEntry);
-      return nextEntries;
+      return entry ? [...prev, ...copyEntryToDays(entry, dates, prev)] : prev;
     });
   }, []);
 
@@ -105,7 +87,7 @@ export const useCSV = () => {
     applyMapping,
     updateEntry,
     removeEntry,
-    cloneEntry,
+    copyEntryToDates,
     clearEntries,
     addEntries,
     cancelMapping: () => {

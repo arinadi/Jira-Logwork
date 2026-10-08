@@ -8,7 +8,7 @@ Module 7 (Performance Enhancement): Holiday integration completed.
 - **Progress Tracking**: Real-time batch progress (N/total) with visual feedback in both the header and sidebar.
 - **Runtime**: Chrome extension (MV3). `npm run build` → `extension/` (committed). Jira calls go direct with the browser session; no proxy, no PWA.
 - **Holiday Service**: `src/services/holidays.ts` integrates Nager.at API for public holidays. Uses localStorage cache (24h TTL). Country preference stored in `jira_logwork_country` key.
-- **Performance Tracker**: `src/components/DailyCapacityTracker.tsx` shows all calendar dates in entry range with weekend/holiday badges, today indicator, and overtime detection.
+- **Day groups**: `src/utils/dayGroups.ts` (pure, tested) builds the per-day groups and range summary; `src/components/DayGroupList.tsx` renders them. Workspace, target and theme persist in localStorage (`src/utils/workspaceStorage.ts`, `src/utils/preferences.ts`).
 
 ## Development Notes
 - **Rate Limits**: The 1s delay is critical. Do not reduce it without direct user approval.
