@@ -15,7 +15,7 @@ import { useSync } from './hooks/useSync';
 import { useHolidays } from './hooks/useHolidays';
 import { formatMinutes, groupByDay, rangeSummary } from './utils/dayGroups';
 import { loadTheme, saveTheme, type Theme } from './utils/preferences';
-import { validateEntry } from './utils/validation';
+import { isBatchSyncable } from './utils/syncRules';
 
 function AppContent() {
   const csvInputId = useId();
@@ -27,7 +27,7 @@ function AppContent() {
 
   const {
     entries, isMapping, pendingData, importFile, applyMapping, updateEntry, removeEntry,
-    copyEntryToDates, clearEntries, addEntries, cancelMapping,
+    copyEntryToDates, acceptSuggestions, clearEntries, addEntries, cancelMapping,
   } = useCSV();
   const { syncSingleEntry, syncAllValid, isSyncing, progress } = useSync(entries, updateEntry, allowedComponents);
 
@@ -53,7 +53,8 @@ function AppContent() {
   const summary = rangeSummary(groups, dailyTargetMinutes);
   const dated = groups.filter(g => g.date !== '');
 
-  const readyValid = entries.filter(e => e.status === 'ready' && Object.keys(validateEntry(e)).length === 0).length;
+  const readyValid = entries.filter(isBatchSyncable).length;
+  const suggestedCount = entries.filter(e => e.suggestion && e.status === 'ready').length;
   const syncedCount = entries.filter(e => e.status === 'synced').length;
   const failedCount = entries.filter(e => e.status === 'failed' || e.status === 'error').length;
 
@@ -126,6 +127,7 @@ function AppContent() {
               </div>
               <p className="text-sm text-[var(--text-subtle)]">
                 <span className="font-medium text-[var(--text-main)]">{readyValid}</span> ready ·{' '}
+                {suggestedCount > 0 && <><span className="font-medium text-[var(--off)]">{suggestedCount}</span> suggested (review per day) ·{' '}</>}
                 <span className="font-medium text-[var(--ok)]">{syncedCount}</span> synced ·{' '}
                 <span className="font-medium text-[var(--danger)]">{failedCount}</span> failed
               </p>
@@ -148,6 +150,7 @@ function AppContent() {
               onUpdate={updateEntry}
               onRemove={removeEntry}
               onCopyToDays={copyEntryToDates}
+              onAcceptSuggestions={acceptSuggestions}
               onSyncRow={syncSingleEntry}
             />
           </>

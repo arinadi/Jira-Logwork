@@ -16,6 +16,7 @@
   - 🟢 **Today** — today's group is marked.
   - A summary bar on top shows logged vs. target × working days for the whole range.
 - 🧩 **Allowed Components** — In Settings, list the Jira components you may log on (e.g. `DES-Systems, Anoman`; empty = all, case-insensitive). The scan makes new rows only for issues with one of them and lists the others as "outside allowed components"; Sync reads the issue's components first and refuses a row on any other issue, so nothing wrong reaches Jira. Time already logged elsewhere still counts toward the day.
+- 🕳️ **Empty Days Filled as Suggestions** — A working day with no ticket activity gets *Suggested* rows: first the tickets that were assigned to you and in a working status that day, else the tickets of the nearest earlier active day (up to 5 working days). Suggested rows are never part of a batch sync until you accept them.
 - 🎯 **Daily Target Setting** — One target (default `8h`) in Settings, used by the scan, the day headers and the summary.
 - 📋 **Copy Row to Days** — Copy a row to several chosen days; days where that issue already has a row are skipped.
 - 💾 **Nothing Lost on Reload** — The workspace is saved in this browser on every change and restored on open. A row that was mid-sync at reload comes back as failed with "check Jira before retry", because it may already be posted.
@@ -63,6 +64,18 @@ Then, per day:
   ├── Free time = daily target − all your logged time that day (on any issue)
   ├── Free time split over the new tickets in minutes; the parts sum exactly to the free time
   └── No free time left → no new rows; the day is listed as "full" in the scan result
+
+Empty working days (inside the range, not weekend/holiday, no row at all):
+  ├── 1. In progress: tickets that at some moment that day were assigned to you AND in a working status
+  │      (Settings "Working statuses"; empty = Jira's In Progress category, so "Pending Customer
+  │      Confirmation", "QUEUED", "On Hold" do not count). Found with
+  │      `assignee WAS currentUser() DURING (start, end + 1 day)` + bulk status/assignee history.
+  │      → target split over them, "Suggested · in progress", text "In progress: <summary>"
+  ├── 2. Else carry-over: the tickets of the nearest earlier day in the range that has rows, for at most
+  │      5 working days after it → "Suggested · carried over", text "Continued: <that day's text>"
+  └── 3. Else the day stays empty
+  Allowed components apply to suggestions too. Batch Sync skips Suggested rows; "Accept suggestions"
+  on the day (or editing a row) turns them into normal rows.
 
 Text of a new row: your comment that day → your transitions that day → issue summary.
 Issues that fail to load are listed in the scan result; the rest is still returned.

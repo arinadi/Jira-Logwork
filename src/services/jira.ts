@@ -30,7 +30,7 @@ export const jiraService = {
   async searchIssues(config: AuthConfig, jql: string, nextPageToken?: string, signal?: AbortSignal) {
     const queryParams = new URLSearchParams({
       jql,
-      fields: 'key,summary,components',
+      fields: 'key,summary,components,status,assignee',
       maxResults: '100',
     });
     if (nextPageToken) queryParams.set('nextPageToken', nextPageToken);
@@ -52,13 +52,13 @@ export const jiraService = {
   },
 
   /**
-   * Fetches one page of status changelogs for up to 1000 issues at once, oldest first.
+   * Fetches one page of changelogs (only the given fields) for up to 1000 issues at once, oldest first.
    * The response is keyed by issue ID, not key.
    */
-  async bulkFetchStatusChangelogs(config: AuthConfig, issueIdsOrKeys: string[], nextPageToken?: string, signal?: AbortSignal) {
+  async bulkFetchChangelogs(config: AuthConfig, issueIdsOrKeys: string[], fieldIds: string[], nextPageToken?: string, signal?: AbortSignal) {
     const response = await this.apiFetch(config, '/rest/api/3/changelog/bulkfetch', {
       method: 'POST',
-      body: JSON.stringify({ issueIdsOrKeys, fieldIds: ['status'], maxResults: 1000, ...(nextPageToken ? { nextPageToken } : {}) }),
+      body: JSON.stringify({ issueIdsOrKeys, fieldIds, maxResults: 1000, ...(nextPageToken ? { nextPageToken } : {}) }),
       signal,
     });
     if (!response.ok) throw new Error(`Bulk changelog fetch failed (${response.status})`);
@@ -91,6 +91,16 @@ export const jiraService = {
     const response = await this.apiFetch(config, `/rest/api/3/issue/${issueKey}/worklog?${queryParams.toString()}`, { signal });
     if (!response.ok) throw new Error(`Failed to fetch worklogs for ${issueKey}`);
     return response.json();
+  },
+
+  /** Every status of the site with its category key ('new' | 'indeterminate' | 'done') */
+  async getStatuses(config: AuthConfig, signal?: AbortSignal): Promise<Array<{ id: string; name: string; category: string }>> {
+    const response = await this.apiFetch(config, '/rest/api/3/status', { signal });
+    if (!response.ok) throw new Error(`Could not read statuses (${response.status})`);
+    const statuses = await response.json();
+    return statuses.map((s: { id: string; name: string; statusCategory?: { key?: string } }) => ({
+      id: String(s.id), name: s.name, category: s.statusCategory?.key || 'new',
+    }));
   },
 
   /** Component names of one issue */

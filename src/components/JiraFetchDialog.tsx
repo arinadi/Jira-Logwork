@@ -5,6 +5,7 @@ import { usePreferences } from '../context/preferencesContext';
 import { jiraFetcher, type FetchParams, type ScanResult } from '../utils/jiraFetcher';
 import { defaultScanJql, defaultScanRange, scanPresetRange, type ScanPreset } from '../utils/scanDefaults';
 import { csvExporter } from '../utils/csvExporter';
+import { holidayService } from '../services/holidays';
 import type { WorklogEntry } from '../types/worklog';
 import { Dialog } from './Dialog';
 
@@ -21,7 +22,7 @@ const PRESETS: Array<{ id: ScanPreset; label: string }> = [
 
 export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ onClose, onImport }) => {
   const { config } = useAuth();
-  const { dailyTarget, allowedComponents } = usePreferences();
+  const { dailyTarget, allowedComponents, workingStatuses, holidayCountry } = usePreferences();
   // Lazy init: the parent mounts this dialog on open, so "today" is the day the dialog is opened.
   const [range, setRange] = useState(() => defaultScanRange(new Date()));
   const [customJql, setCustomJql] = useState<string | null>(null);
@@ -46,7 +47,16 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ onClose, onImp
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
-    const params: FetchParams = { ...range, jql, defaultTime: dailyTarget, allowedComponents };
+    // Holidays are not working days, so empty-day suggestions must skip them. A failed lookup only
+    // means holidays may get suggestions, which the user still reviews — not a reason to stop the scan.
+    const years = Array.from(new Set([range.startDate.slice(0, 4), range.endDate.slice(0, 4)]));
+    const nonWorkingDays = (await Promise.all(years.map(y =>
+      holidayService.getPublicHolidays(Number(y), holidayCountry).catch(err => {
+        console.error('Holiday lookup failed:', err);
+        return [];
+      })
+    ))).flat().map(h => h.date);
+    const params: FetchParams = { ...range, jql, defaultTime: dailyTarget, allowedComponents, workingStatuses, nonWorkingDays };
 
     try {
       const scanResult = await jiraFetcher.fetchEvents(
@@ -137,6 +147,11 @@ export const JiraFetchDialog: React.FC<JiraFetchDialogProps> = ({ onClose, onImp
           {scan.failedIssues.length > 0 && (
             <p role="alert" className="px-2 py-1.5 rounded-[3px] text-sm bg-[var(--danger-bg)] text-[var(--danger)]">
               Partial result: could not read {scan.failedIssues.join(', ')}. Their activity is missing.
+            </p>
+          )}
+          {entries.some(e => e.suggestion) && (
+            <p className="px-2 py-1.5 rounded-[3px] text-sm bg-[var(--off-bg)] text-[var(--off)]">
+              {entries.filter(e => e.suggestion).length} suggested rows for days without ticket activity — review and accept them per day; batch Sync skips them.
             </p>
           )}
           {scan.outsideComponents.length > 0 && (

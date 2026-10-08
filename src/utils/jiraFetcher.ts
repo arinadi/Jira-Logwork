@@ -1,8 +1,9 @@
 import type { AuthConfig } from '../types/auth';
 import type { WorklogEntry } from '../types/worklog';
 import { jiraService } from '../services/jira';
-import { format, parseISO, addDays, isWithinInterval } from 'date-fns';
+import { format, parseISO, addDays, isWithinInterval, eachDayOfInterval, isWeekend } from 'date-fns';
 import { parseDurationToHours } from './validation';
+import { componentInClause } from './scanDefaults';
 
 export interface FetchParams {
   jql: string;
@@ -11,6 +12,10 @@ export interface FetchParams {
   defaultTime?: string;
   /** Component names new rows are allowed on; empty or missing = all. */
   allowedComponents?: string[];
+  /** yyyy-MM-dd days that are not working days besides weekends (public holidays, leave) */
+  nonWorkingDays?: string[];
+  /** Status names that count as "working on it"; empty = Jira's In Progress category */
+  workingStatuses?: string[];
 }
 
 /**
@@ -26,6 +31,9 @@ const ISSUE_CONCURRENCY = 5;
 function jiraDate(value: string | number): Date {
   return typeof value === 'number' ? new Date(value) : parseISO(value);
 }
+
+/** Empty working days after the last active day that may inherit its tickets. */
+const CARRY_OVER_WORKING_DAYS = 5;
 
 /** Reads a startAt-paged Jira list to the end; Jira may return fewer items than asked, so trust total. */
 async function readAllPages<T>(
@@ -145,7 +153,7 @@ export const jiraFetcher = {
     onProgress?: (current: number, total: number, message: string) => void,
     signal?: AbortSignal
   ): Promise<ScanResult> {
-    const { jql, startDate, endDate, defaultTime = '8h', allowedComponents = [] } = params;
+    const { jql, startDate, endDate, defaultTime = '8h', allowedComponents = [], nonWorkingDays = [], workingStatuses = [] } = params;
     const allowed = new Set(allowedComponents.map(c => c.toLowerCase()));
     const start = parseISO(startDate);
     // End date must include the full day — shift to next midnight so isWithinInterval is inclusive
@@ -160,6 +168,8 @@ export const jiraFetcher = {
     const issueMap = new Map<string, string>(); // key -> summary
     const keyById = new Map<string, string>(); // bulk changelog answers by issue ID
     const componentsByKey = new Map<string, string[]>(); // lower-case component names
+    // Status id + assignee now: the starting point to replay history backwards for empty days.
+    const currentByKey = new Map<string, { statusId: string; assignee: string | null }>();
     const collectIssues = async (query: string) => {
       let nextPageToken: string | undefined;
       while (!signal?.aborted) {
@@ -170,6 +180,7 @@ export const jiraFetcher = {
           issueMap.set(issue.key, summary);
           if (issue.id) keyById.set(String(issue.id), issue.key);
           componentsByKey.set(issue.key, (issue.fields?.components || []).map((c: { name?: string }) => (c.name || '').toLowerCase()));
+          currentByKey.set(issue.key, { statusId: String(issue.fields?.status?.id ?? ''), assignee: issue.fields?.assignee?.accountId ?? null });
         }
         if (data.isLast || !data.nextPageToken) break;
         nextPageToken = data.nextPageToken;
@@ -183,22 +194,41 @@ export const jiraFetcher = {
     } catch (err) {
       if ((err as Error).name !== 'AbortError') throw err;
     }
+    // Only these get comment + worklog calls; tickets found below are only candidates for empty days.
+    const scanKeys = Array.from(issueMap.keys());
 
+    const dayAfterEnd = format(end, 'yyyy-MM-dd');
+    const componentClause = allowedComponents.length
+      ? ` AND ${componentInClause(allowedComponents)}`
+      : '';
+    try {
+      await collectIssues(`assignee WAS currentUser() DURING ("${startDate}", "${dayAfterEnd}")${componentClause}`);
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') throw err;
+    }
     const allIssueKeys = Array.from(issueMap.keys());
 
     // One bulk call per 1000 issues instead of one changelog call per issue: the per-issue round trips
     // were most of the scan time.
     const statusChangesByKey = new Map<string, Array<{ date: string; statusChange: string }>>();
+    // Every status/assignee change by anyone, to know who had the ticket in which status on a given day.
+    const historyByKey = new Map<string, Array<{ time: number; field: 'status' | 'assignee'; from: string | null; to: string | null }>>();
     for (let from = 0; from < allIssueKeys.length && !signal?.aborted; from += 1000) {
       const chunk = allIssueKeys.slice(from, from + 1000);
       let nextPageToken: string | undefined;
       do {
-        const page = await jiraService.bulkFetchStatusChangelogs(config, chunk, nextPageToken, signal);
+        const page = await jiraService.bulkFetchChangelogs(config, chunk, ['status', 'assignee'], nextPageToken, signal);
         for (const issueLog of page.issueChangeLogs || []) {
           const key = keyById.get(String(issueLog.issueId)) || String(issueLog.issueId);
           for (const history of issueLog.changeHistories || []) {
-            if (history.author?.accountId !== myAccountId) continue;
             const createdDate = jiraDate(history.created);
+            for (const item of history.items || []) {
+              if (item.field !== 'status' && item.field !== 'assignee') continue;
+              const list = historyByKey.get(key) || [];
+              list.push({ time: createdDate.getTime(), field: item.field, from: item.from ?? null, to: item.to ?? null });
+              historyByKey.set(key, list);
+            }
+            if (history.author?.accountId !== myAccountId) continue;
             if (!isWithinInterval(createdDate, { start, end })) continue;
             for (const item of history.items || []) {
               if (item.field !== 'status') continue;
@@ -211,9 +241,9 @@ export const jiraFetcher = {
         nextPageToken = page.nextPageToken || undefined;
       } while (nextPageToken && !signal?.aborted);
     }
-    const totalSteps = allIssueKeys.length; // progress counts finished issues
+    const totalSteps = scanKeys.length; // progress counts finished issues
     let doneIssues = 0;
-    onProgress?.(0, totalSteps, `Found ${allIssueKeys.length} issues. Reading comments and worklogs...`);
+    onProgress?.(0, totalSteps, `Found ${scanKeys.length} issues. Reading comments and worklogs...`);
 
     // Collect raw events and track existing worklogs
     const rawEvents: RawEvent[] = [];
@@ -313,11 +343,11 @@ export const jiraFetcher = {
     // A small fixed pool keeps the scan fast without flooding Jira; any 429 is retried in jiraService.
     let nextIndex = 0;
     const worker = async () => {
-      while (!signal?.aborted && nextIndex < allIssueKeys.length) {
-        await scanIssue(allIssueKeys[nextIndex++]);
+      while (!signal?.aborted && nextIndex < scanKeys.length) {
+        await scanIssue(scanKeys[nextIndex++]);
       }
     };
-    await Promise.all(Array.from({ length: Math.min(ISSUE_CONCURRENCY, allIssueKeys.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(ISSUE_CONCURRENCY, scanKeys.length) }, worker));
     // Workers finish in any order; keep the list stable for the user.
     failedIssues.sort();
 
@@ -413,6 +443,88 @@ export const jiraFetcher = {
           originalRowIndex: entries.length,
         });
       }
+    }
+
+    // Step 5 — Empty working days: suggest what the user was most likely doing.
+    const statuses = await jiraService.getStatuses(config, signal);
+    const workingNames = new Set(workingStatuses.map(n => n.toLowerCase()));
+    const workingStatusIds = new Set(statuses
+      .filter(st => (workingNames.size > 0 ? workingNames.has(st.name.toLowerCase()) : st.category === 'indeterminate'))
+      .map(st => st.id));
+    const targetMinutes = Math.round(dailyHours * 60);
+
+    /** Undo every change after `time` from the current values: who had the ticket, in which status, then. */
+    const stateAt = (key: string, time: number) => {
+      const state = { ...(currentByKey.get(key) || { statusId: '', assignee: null }) };
+      const changes = [...(historyByKey.get(key) || [])].sort((a, b) => b.time - a.time);
+      for (const change of changes) {
+        if (change.time <= time) break;
+        if (change.field === 'status') state.statusId = change.from ?? '';
+        else state.assignee = change.from;
+      }
+      return state;
+    };
+    // "That day" = at its start or right after any change during it, so a ticket picked up mid-day counts.
+    const workedOn = (key: string, dayStart: number, dayEnd: number) => {
+      const moments = [dayStart, ...(historyByKey.get(key) || []).map(c => c.time).filter(t => t >= dayStart && t < dayEnd)];
+      return moments.some(t => {
+        const state = stateAt(key, t);
+        return state.assignee === myAccountId && workingStatusIds.has(state.statusId);
+      });
+    };
+
+    const nonWorking = new Set(nonWorkingDays);
+    const suggest = (date: string, rows: Array<{ issueKey: string; comment: string }>, suggestion: 'in-progress' | 'carry-over') => {
+      const parts = splitMinutes(targetMinutes, rows.length);
+      rows.forEach((row, i) => {
+        if (parts[i] === 0) return;
+        entries.push({
+          id: crypto.randomUUID(),
+          issueKey: row.issueKey,
+          date,
+          timeSpent: minutesToJiraTime(parts[i]),
+          comment: row.comment,
+          status: 'ready',
+          originalRowIndex: entries.length,
+          suggestion,
+        });
+      });
+    };
+
+    // Days in order: the last day with real rows is the carry-over source for the empty days after it.
+    let lastActiveRows: WorklogEntry[] = [];
+    let workingDaysSinceActive = 0;
+    for (const day of eachDayOfInterval({ start, end: addDays(end, -1) })) {
+      const date = format(day, 'yyyy-MM-dd');
+      if (isWeekend(day) || nonWorking.has(date)) continue;
+      const realRows = entries.filter(e => e.date === date && !e.suggestion);
+      if (realRows.length > 0) {
+        lastActiveRows = realRows;
+        workingDaysSinceActive = 0;
+        continue;
+      }
+      workingDaysSinceActive++;
+
+      // 1. Tickets I had in a working status that day: the best evidence of what the day was spent on.
+      const dayStart = day.getTime();
+      const dayEnd = addDays(day, 1).getTime();
+      const inProgress = allIssueKeys.filter(key => isAllowed(key) && workedOn(key, dayStart, dayEnd)).sort();
+      if (inProgress.length > 0) {
+        suggest(date, inProgress.map(key => ({ issueKey: key, comment: `In progress: ${issueMap.get(key) || key}` })), 'in-progress');
+        continue;
+      }
+
+      // 2. Else the work of the last active day most likely went on — but only for a short gap; a longer
+      // one is more likely leave or other work, and a wrong guess would end up in Jira.
+      if (lastActiveRows.length > 0 && workingDaysSinceActive <= CARRY_OVER_WORKING_DAYS) {
+        const seen = new Set<string>();
+        const carried = lastActiveRows
+          .filter(r => isAllowed(r.issueKey) && !seen.has(r.issueKey) && seen.add(r.issueKey))
+          .sort((a, b) => a.issueKey.localeCompare(b.issueKey))
+          .map(r => ({ issueKey: r.issueKey, comment: `Continued: ${r.comment}` }));
+        if (carried.length > 0) suggest(date, carried, 'carry-over');
+      }
+      // 3. Otherwise the day stays empty on purpose.
     }
 
     // Sort by date ascending, then by issue key

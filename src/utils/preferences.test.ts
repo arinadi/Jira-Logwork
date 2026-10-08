@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { loadAllowedComponents, loadDailyTarget, loadTheme, parseAllowedComponents, saveAllowedComponents, saveDailyTarget, saveTheme } from './preferences';
+import { loadAllowedComponents, loadDailyTarget, loadTheme, loadWorkingStatuses, parseAllowedComponents, saveAllowedComponents, saveDailyTarget, saveTheme, saveWorkingStatuses } from './preferences';
 
 /** In-memory stand-in for window.localStorage. */
 function memoryStorage(): Storage {
@@ -57,6 +57,17 @@ describe('allowed components', () => {
     saveAllowedComponents(storage, 'DES-Systems, Anoman');
 
     expect(loadAllowedComponents(storage)).toEqual(['DES-Systems', 'Anoman']);
+  });
+});
+
+describe('working statuses', () => {
+  it('is empty (Jira In Progress category) until saved, then keeps the cleaned list', () => {
+    const storage = memoryStorage();
+    expect(loadWorkingStatuses(storage)).toEqual([]);
+
+    saveWorkingStatuses(storage, 'In Progress, Pending Customer Confirmation, in progress');
+
+    expect(loadWorkingStatuses(storage)).toEqual(['In Progress', 'Pending Customer Confirmation']);
   });
 });
 

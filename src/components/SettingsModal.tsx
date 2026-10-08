@@ -13,11 +13,12 @@ interface SettingsModalProps {
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
   const { config, user, error, saveConfig, disconnect } = useAuth();
-  const { dailyTarget, setDailyTarget, holidayCountry, setHolidayCountry, allowedComponents, setAllowedComponents } = usePreferences();
+  const { dailyTarget, setDailyTarget, holidayCountry, setHolidayCountry, allowedComponents, setAllowedComponents, workingStatuses, setWorkingStatuses } = usePreferences();
   const [domain, setDomain] = useState(config?.domain || '');
   const [target, setTarget] = useState(dailyTarget);
   const [country, setCountry] = useState(holidayCountry);
   const [components, setComponents] = useState(allowedComponents.join(', '));
+  const [statuses, setStatuses] = useState(workingStatuses.join(', '));
   const [countries, setCountries] = useState<AvailableCountry[]>([]);
   const [countriesLoading, setCountriesLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -37,6 +38,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
     setDailyTarget(target);
     setHolidayCountry(country);
     setAllowedComponents(components);
+    setWorkingStatuses(statuses);
     const connected = await saveConfig({ domain });
     setSaving(false);
     if (connected) onClose();
@@ -124,6 +126,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
           />
           <p id="settings-components-help" className="mt-1 text-xs text-[var(--text-subtle)]">
             Comma list of Jira components you may log on. The scan only suggests these, and Sync refuses any other issue. Empty = all components.
+          </p>
+        </div>
+
+        <div>
+          <label htmlFor="settings-statuses" className="field-label">Working statuses</label>
+          <input
+            id="settings-statuses"
+            type="text"
+            className="field"
+            placeholder="empty = Jira's In Progress category"
+            aria-describedby="settings-statuses-help"
+            value={statuses}
+            onChange={(e) => setStatuses(e.target.value)}
+          />
+          <p id="settings-statuses-help" className="mt-1 text-xs text-[var(--text-subtle)]">
+            For days without ticket activity: tickets assigned to you in one of these statuses are suggested. Empty = In Progress, Research, QA, Code Review…; waiting statuses like Pending Customer Confirmation are not counted.
           </p>
         </div>
 

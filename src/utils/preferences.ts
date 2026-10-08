@@ -58,3 +58,14 @@ export function loadAllowedComponents(storage: Storage): string[] {
 export function saveAllowedComponents(storage: Storage, text: string): void {
   storage.setItem(COMPONENTS_STORAGE_KEY, parseAllowedComponents(text).join(', '));
 }
+
+export const WORKING_STATUSES_STORAGE_KEY = 'jira_logwork_working_statuses';
+
+/** Status names meaning "I am working on it"; empty = Jira's In Progress category. Same comma-list rules. */
+export function loadWorkingStatuses(storage: Storage): string[] {
+  return parseAllowedComponents(storage.getItem(WORKING_STATUSES_STORAGE_KEY) || '');
+}
+
+export function saveWorkingStatuses(storage: Storage, text: string): void {
+  storage.setItem(WORKING_STATUSES_STORAGE_KEY, parseAllowedComponents(text).join(', '));
+}

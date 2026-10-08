@@ -26,8 +26,12 @@ export function defaultScanJql(startDate: string, endDate: string, allowedCompon
   if (allowedComponents.length === 0) return `${ownWorklogs} OR ${activity}`;
   // Only the activity part is limited: own worklogs on any issue must still be found so the day total is right.
   // This only makes the scan smaller; jiraFetcher enforces the component rule itself.
-  const components = allowedComponents.map(c => `"${c.replace(/"/g, '\\"')}"`).join(', ');
-  return `${ownWorklogs} OR (${activity}) AND component in (${components})`;
+  return `${ownWorklogs} OR (${activity}) AND ${componentInClause(allowedComponents)}`;
+}
+
+/** `component in ("A", "B")` with quotes in names escaped for JQL. */
+export function componentInClause(components: string[]): string {
+  return `component in (${components.map(c => `"${c.replace(/"/g, '\\"')}"`).join(', ')})`;
 }
 
 export type ScanPreset = 'thisWeek' | 'lastWeek' | 'thisMonth';

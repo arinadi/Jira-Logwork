@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { jiraService } from '../services/jira';
 import type { WorklogEntry } from '../types/worklog';
 import { validateEntry } from '../utils/validation';
+import { isBatchSyncable } from '../utils/syncRules';
 import { createComponentGuard } from '../services/componentGuard';
 
 export const useSync = (
@@ -73,7 +74,7 @@ export const useSync = (
   }, [config, onUpdateEntry, checkComponents, allowedComponents]);
 
   const syncAllValid = useCallback(async () => {
-    const readyEntries = entries.filter(e => e.status === 'ready' && Object.keys(validateEntry(e)).length === 0);
+    const readyEntries = entries.filter(isBatchSyncable);
     if (readyEntries.length === 0 || !config) return;
 
     setIsSyncing(true);

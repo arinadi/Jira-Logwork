@@ -9,6 +9,8 @@ export interface WorklogEntry {
   status: EntryStatus;
   errorMessage?: string;
   originalRowIndex: number;
+  /** Set on rows the scan guessed for a day without ticket activity; cleared when the user accepts or edits. */
+  suggestion?: 'in-progress' | 'carry-over';
 }
 
 export interface FieldMapping {

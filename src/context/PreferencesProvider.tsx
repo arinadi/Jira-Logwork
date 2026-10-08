@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { loadAllowedComponents, loadDailyTarget, saveAllowedComponents, saveDailyTarget } from '../utils/preferences';
+import { loadAllowedComponents, loadDailyTarget, loadWorkingStatuses, saveAllowedComponents, saveDailyTarget, saveWorkingStatuses } from '../utils/preferences';
 import { parseDurationToHours } from '../utils/validation';
 import { getSavedCountry, saveCountry } from '../services/holidays';
 import { PreferencesContext } from './preferencesContext';
@@ -15,6 +15,13 @@ export const PreferencesProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const setAllowedComponents = useCallback((text: string) => {
     saveAllowedComponents(localStorage, text);
     setComponents(loadAllowedComponents(localStorage));
+  }, []);
+
+  const [workingStatuses, setStatuses] = useState(() => loadWorkingStatuses(localStorage));
+
+  const setWorkingStatuses = useCallback((text: string) => {
+    saveWorkingStatuses(localStorage, text);
+    setStatuses(loadWorkingStatuses(localStorage));
   }, []);
 
   const setHolidayCountry = useCallback((countryCode: string) => {
@@ -36,7 +43,9 @@ export const PreferencesProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setHolidayCountry,
     allowedComponents,
     setAllowedComponents,
-  }), [dailyTarget, setDailyTarget, holidayCountry, setHolidayCountry, allowedComponents, setAllowedComponents]);
+    workingStatuses,
+    setWorkingStatuses,
+  }), [dailyTarget, setDailyTarget, holidayCountry, setHolidayCountry, allowedComponents, setAllowedComponents, workingStatuses, setWorkingStatuses]);
 
   return <PreferencesContext.Provider value={value}>{children}</PreferencesContext.Provider>;
 };

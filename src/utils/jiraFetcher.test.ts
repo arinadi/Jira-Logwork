@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { jiraFetcher } from './jiraFetcher';
 import type { AuthConfig } from '../types/auth';
+import type { WorklogEntry } from '../types/worklog';
 
 const config: AuthConfig = { domain: 'acme.atlassian.net' };
 const ME = { accountId: 'acc-me', displayName: 'Same Name' };
@@ -9,6 +10,19 @@ const OTHER = { accountId: 'acc-other', displayName: 'Same Name' };
 interface FakeComment { author: typeof ME; created: string; text: string }
 interface FakeWorklog { author: typeof ME; started: string; timeSpentSeconds: number; text?: string }
 interface FakeHistory { author: typeof ME; created: string; from: string; to: string }
+type Account = typeof ME;
+interface FakeAssigneeChange { created: string; from: Account | null; to: Account | null }
+
+/** Status name → id + category, like GET /rest/api/3/status */
+const STATUSES: Record<string, { id: string; category: 'new' | 'indeterminate' | 'done' }> = {
+  'Open': { id: '1', category: 'new' },
+  'In Progress': { id: '3', category: 'indeterminate' },
+  'QA': { id: '10321', category: 'indeterminate' },
+  'Review': { id: '10214', category: 'indeterminate' },
+  'Pending Customer Confirmation': { id: '10043', category: 'new' },
+  'Done': { id: '10068', category: 'done' },
+};
+const statusId = (name: string) => STATUSES[name]?.id ?? name;
 interface FakeIssue {
   key: string;
   summary?: string;
@@ -18,6 +32,11 @@ interface FakeIssue {
   fail?: boolean;
   /** Component names, as returned in search fields */
   components?: string[];
+  /** Status now (search field); default 'Open' */
+  currentStatus?: string;
+  /** Assignee now (search field); default nobody */
+  currentAssignee?: Account | null;
+  assigneeChanges?: FakeAssigneeChange[];
   /** The first comments call answers 429 with this Retry-After (seconds); later calls succeed. */
   rateLimitOnceSeconds?: number;
 }
@@ -79,10 +98,19 @@ function fakeJira({ issues, searchByJql = () => issues.map(i => i.key), pageSize
         issues: page.map(k => ({ id: idOf(k), key: k, fields: {
           summary: byKey.get(k)?.summary || `Summary ${k}`,
           components: (byKey.get(k)?.components || []).map((name, n) => ({ id: String(n), name })),
+          status: (() => {
+            const name = byKey.get(k)?.currentStatus || 'Open';
+            return { id: statusId(name), name, statusCategory: { key: STATUSES[name]?.category ?? 'new' } };
+          })(),
+          assignee: byKey.get(k)?.currentAssignee ?? null,
         } })),
         isLast,
         ...(isLast ? {} : { nextPageToken: String(next) }),
       });
+    }
+
+    if (path === '/rest/api/3/status') {
+      return json(Object.entries(STATUSES).map(([name, st]) => ({ id: st.id, name, statusCategory: { key: st.category } })));
     }
 
     if (path === '/rest/api/3/changelog/bulkfetch' && init?.method === 'POST') {
@@ -91,10 +119,18 @@ function fakeJira({ issues, searchByJql = () => issues.map(i => i.key), pageSize
       const all = body.issueIdsOrKeys
         .map(ref => byKey.get(ref) || byId.get(ref))
         .filter((i): i is FakeIssue => !!i)
-        .flatMap(i => (i.histories || []).map((h, n) => ({ issueId: idOf(i.key), history: {
-          id: `${i.key}-${n}`, author: h.author, created: bulkCreatedAsEpochMs ? Date.parse(h.created) : h.created,
-          items: [{ field: 'status', fieldId: 'status', fromString: h.from, toString: h.to }],
-        } })));
+        .flatMap(i => [
+          ...(i.histories || []).map((h, n) => ({ issueId: idOf(i.key), created: h.created, history: {
+            id: `${i.key}-${n}`, author: h.author, created: bulkCreatedAsEpochMs ? Date.parse(h.created) : h.created,
+            items: [{ field: 'status', fieldId: 'status', from: statusId(h.from), fromString: h.from, to: statusId(h.to), toString: h.to }],
+          } })),
+          ...(i.assigneeChanges || []).map((a, n) => ({ issueId: idOf(i.key), created: a.created, history: {
+            id: `${i.key}-a${n}`, author: OTHER, created: bulkCreatedAsEpochMs ? Date.parse(a.created) : a.created,
+            items: [{ field: 'assignee', fieldId: 'assignee', from: a.from?.accountId ?? null, to: a.to?.accountId ?? null }],
+          } })),
+        ])
+        .filter(h => (body.fieldIds || []).length === 0 || h.history.items.some(it => body.fieldIds!.includes(it.fieldId)))
+        .sort((a, b) => Date.parse(a.created) - Date.parse(b.created));
       const offset = Number(body.nextPageToken || '0');
       const page = all.slice(offset, offset + pageSize);
       const byIssue = new Map<string, unknown[]>();
@@ -154,7 +190,7 @@ function fakeJira({ issues, searchByJql = () => issues.map(i => i.key), pageSize
 }
 
 /** Runs a scan to the end while fake timers skip the throttle delays. */
-async function scan(params: { jql?: string; startDate: string; endDate: string; defaultTime?: string; allowedComponents?: string[] }) {
+async function scan(params: { jql?: string; startDate: string; endDate: string; defaultTime?: string; allowedComponents?: string[]; nonWorkingDays?: string[]; workingStatuses?: string[] }) {
   const pending = jiraFetcher.fetchEvents(config, { jql: params.jql ?? 'project = A', ...params });
   await vi.runAllTimersAsync();
   return pending;
@@ -428,6 +464,125 @@ describe('jiraFetcher.fetchEvents', () => {
       ['B-1', 'synced', '3h'],
     ]);
     expect(result.outsideComponents).toEqual(['C-1']);
+  });
+
+  describe('empty working days', () => {
+    /** Active on Mon 05 and Thu 08 Oct, nothing on Tue 06 / Wed 07. */
+    const activeMonThu = (key = 'A-1'): FakeIssue => ({
+      key,
+      comments: [
+        { author: ME, created: '2026-10-05T10:00:00.000+0700', text: 'monday work' },
+        { author: ME, created: '2026-10-08T10:00:00.000+0700', text: 'thursday work' },
+      ],
+    });
+    const rowsOn = (entries: WorklogEntry[], date: string) =>
+      entries.filter(e => e.date === date).map(e => [e.issueKey, e.timeSpent, e.suggestion, e.comment]);
+
+    it('fills an empty working day with tickets assigned to me and in a working status that day', async () => {
+      fakeJira({
+        issues: [
+          activeMonThu(),
+          {
+            key: 'X-1', summary: 'Build exporter', currentStatus: 'In Progress', currentAssignee: ME,
+            assigneeChanges: [{ created: '2026-10-01T09:00:00.000+0700', from: null, to: ME }],
+            histories: [{ author: OTHER, created: '2026-10-02T09:00:00.000+0700', from: 'Open', to: 'In Progress' }],
+          },
+        ],
+      });
+
+      const result = await scan({ startDate: '2026-10-05', endDate: '2026-10-08' });
+
+      expect(rowsOn(result.entries, '2026-10-06')).toEqual([['X-1', '8h', 'in-progress', 'In progress: Build exporter']]);
+      expect(rowsOn(result.entries, '2026-10-07')).toEqual([['X-1', '8h', 'in-progress', 'In progress: Build exporter']]);
+      expect(result.entries.filter(e => e.date === '2026-10-05').every(e => e.suggestion === undefined)).toBe(true);
+    });
+
+    it('does not count a ticket that was only waiting (To Do category) that day', async () => {
+      fakeJira({
+        issues: [
+          activeMonThu(),
+          {
+            key: 'X-1', currentStatus: 'Pending Customer Confirmation', currentAssignee: ME,
+            assigneeChanges: [{ created: '2026-10-01T09:00:00.000+0700', from: null, to: ME }],
+            histories: [{ author: OTHER, created: '2026-10-02T09:00:00.000+0700', from: 'In Progress', to: 'Pending Customer Confirmation' }],
+          },
+        ],
+      });
+
+      const result = await scan({ startDate: '2026-10-05', endDate: '2026-10-08' });
+
+      expect(result.entries.filter(e => e.suggestion === 'in-progress')).toEqual([]);
+    });
+
+    it('does not count a ticket that someone else had that day, but counts it from the day it came to me', async () => {
+      fakeJira({
+        issues: [
+          activeMonThu(),
+          {
+            key: 'X-1', summary: 'Shared ticket', currentStatus: 'In Progress', currentAssignee: ME,
+            // Someone else's until Wed 07 14:00, then mine.
+            assigneeChanges: [
+              { created: '2026-10-01T09:00:00.000+0700', from: null, to: OTHER },
+              { created: '2026-10-07T14:00:00.000+0700', from: OTHER, to: ME },
+            ],
+            histories: [{ author: OTHER, created: '2026-10-02T09:00:00.000+0700', from: 'Open', to: 'In Progress' }],
+          },
+        ],
+      });
+
+      const result = await scan({ startDate: '2026-10-05', endDate: '2026-10-08' });
+
+      expect(result.entries.filter(e => e.suggestion === 'in-progress').map(e => e.date)).toEqual(['2026-10-07']);
+    });
+
+    /** Only Mon 05 Oct is active: A-1 and A-2 have own comments that day. */
+    const activeMondayOnly = (): FakeIssue[] => [
+      { key: 'A-1', comments: [{ author: ME, created: '2026-10-05T10:00:00.000+0700', text: 'monday one' }] },
+      { key: 'A-2', comments: [{ author: ME, created: '2026-10-05T11:00:00.000+0700', text: 'monday two' }] },
+    ];
+
+    it('carries the tickets of the last active day over to following empty working days', async () => {
+      fakeJira({ issues: activeMondayOnly() });
+
+      const result = await scan({ startDate: '2026-10-05', endDate: '2026-10-07' });
+
+      for (const date of ['2026-10-06', '2026-10-07']) {
+        expect(rowsOn(result.entries, date)).toEqual([
+          ['A-1', '4h', 'carry-over', 'Continued: monday one'],
+          ['A-2', '4h', 'carry-over', 'Continued: monday two'],
+        ]);
+      }
+    });
+
+    it('carries over for at most 5 working days, skipping weekends and holidays', async () => {
+      fakeJira({ issues: activeMondayOnly() });
+
+      // Mon 05 active; Wed 07 holiday; Sat 10 / Sun 11 weekend.
+      const result = await scan({ startDate: '2026-10-05', endDate: '2026-10-14', nonWorkingDays: ['2026-10-07'] });
+
+      const carried = Array.from(new Set(result.entries.filter(e => e.suggestion === 'carry-over').map(e => e.date)));
+      expect(carried).toEqual(['2026-10-06', '2026-10-08', '2026-10-09', '2026-10-12', '2026-10-13']);
+    });
+
+    it('uses the configured working statuses instead of the In Progress category', async () => {
+      fakeJira({
+        issues: [
+          activeMonThu(),
+          {
+            key: 'X-1', summary: 'Waiting on customer', currentStatus: 'Pending Customer Confirmation', currentAssignee: ME,
+            assigneeChanges: [{ created: '2026-10-01T09:00:00.000+0700', from: null, to: ME }],
+          },
+          {
+            key: 'X-2', currentStatus: 'In Progress', currentAssignee: ME,
+            assigneeChanges: [{ created: '2026-10-01T09:00:00.000+0700', from: null, to: ME }],
+          },
+        ],
+      });
+
+      const result = await scan({ startDate: '2026-10-05', endDate: '2026-10-08', workingStatuses: ['pending customer confirmation'] });
+
+      expect(rowsOn(result.entries, '2026-10-06')).toEqual([['X-1', '8h', 'in-progress', 'In progress: Waiting on customer']]);
+    });
   });
 });
 

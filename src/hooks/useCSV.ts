@@ -62,6 +62,11 @@ export const useCSV = () => {
     setEntries(prev => prev.filter(e => e.id !== id));
   }, []);
 
+  // The user reviewed the day's guesses: they become normal rows that a batch sync may post.
+  const acceptSuggestions = useCallback((date: string) => {
+    setEntries(prev => prev.map(e => (e.date === date && e.suggestion ? { ...e, suggestion: undefined } : e)));
+  }, []);
+
   const copyEntryToDates = useCallback((id: string, dates: string[]) => {
     setEntries(prev => {
       const entry = prev.find(e => e.id === id);
@@ -88,6 +93,7 @@ export const useCSV = () => {
     updateEntry,
     removeEntry,
     copyEntryToDates,
+    acceptSuggestions,
     clearEntries,
     addEntries,
     cancelMapping: () => {

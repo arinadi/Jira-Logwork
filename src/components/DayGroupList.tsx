@@ -15,6 +15,7 @@ interface DayGroupListProps {
   onRemove: (id: string) => void;
   onCopyToDays: (id: string, dates: string[]) => void;
   onSyncRow: (entry: WorklogEntry) => void;
+  onAcceptSuggestions: (date: string) => void;
 }
 
 const dayTitle = (date: string) => (date ? format(parseISO(date), 'EEE dd MMM yyyy') : 'No valid date');
@@ -43,7 +44,7 @@ const toneClass = {
 
 const barClass = { ok: 'bg-[var(--ok)]', warn: 'bg-[var(--warn)]', danger: 'bg-[var(--danger)]', off: 'bg-[var(--off)]', none: 'bg-[var(--text-subtle)]' };
 
-export const DayGroupList: React.FC<DayGroupListProps> = ({ groups, targetMinutes, jiraDomain, onUpdate, onRemove, onCopyToDays, onSyncRow }) => {
+export const DayGroupList: React.FC<DayGroupListProps> = ({ groups, targetMinutes, jiraDomain, onUpdate, onRemove, onCopyToDays, onSyncRow, onAcceptSuggestions }) => {
   const [copySource, setCopySource] = useState<WorklogEntry | null>(null);
   const datedDays = groups.filter(g => g.date !== '').map(g => g.date);
 
@@ -65,6 +66,11 @@ export const DayGroupList: React.FC<DayGroupListProps> = ({ groups, targetMinute
                 {group.state !== 'off' && group.date && <span className="text-[var(--text-subtle)]"> / {formatMinutes(targetMinutes)}</span>}
               </span>
               <span className={`lozenge ${toneClass[state.tone]}`}>{state.text}</span>
+              {group.entries.some(e => e.suggestion && e.status === 'ready') && (
+                <button type="button" className="btn h-6 px-2 text-xs" onClick={() => onAcceptSuggestions(group.date)}>
+                  Accept suggestions
+                </button>
+              )}
               {group.date && group.state !== 'off' && (
                 <span className="ml-auto hidden sm:block w-32 h-1.5 rounded-full bg-[var(--bg-hover)] overflow-hidden" aria-hidden="true">
                   <span className={`block h-full ${barClass[state.tone]}`} style={{ width: `${fill}%` }} />
@@ -123,11 +129,11 @@ const EntryRow: React.FC<EntryRowProps> = ({ entry, jiraDomain, onUpdate, onRemo
   const name = `${entry.issueKey || 'row'} on ${entry.date || 'no date'}`;
 
   return (
-    <li className="grid gap-x-3 gap-y-1 px-3 py-2 border-b last:border-b-0 items-start grid-cols-[1fr_auto] md:grid-cols-[9rem_8.5rem_5rem_minmax(0,1fr)_6.5rem_auto]">
+    <li className="grid gap-x-3 gap-y-1 px-3 py-2 border-b last:border-b-0 items-start grid-cols-[1fr_auto] md:grid-cols-[9rem_8.5rem_5rem_minmax(0,1fr)_10.5rem_auto]">
       <EditableCell
         value={entry.issueKey}
         label={`Issue key of ${name}`}
-        onSave={(val) => onUpdate(entry.id, { issueKey: val.toUpperCase().trim() })}
+        onSave={(val) => onUpdate(entry.id, { issueKey: val.toUpperCase().trim(), suggestion: undefined })}
         isInvalid={!!errors.issueKey}
         errorMessage={errors.issueKey}
         href={jiraDomain && entry.issueKey ? `https://${jiraDomain}/browse/${entry.issueKey}` : undefined}
@@ -163,7 +169,7 @@ const EntryRow: React.FC<EntryRowProps> = ({ entry, jiraDomain, onUpdate, onRemo
         value={entry.date}
         type="date"
         label={`Date of ${entry.issueKey || 'row'}`}
-        onSave={(val) => onUpdate(entry.id, { date: val })}
+        onSave={(val) => onUpdate(entry.id, { date: val, suggestion: undefined })}
         isInvalid={!!errors.date}
         errorMessage={errors.date}
         disabled={locked}
@@ -172,7 +178,7 @@ const EntryRow: React.FC<EntryRowProps> = ({ entry, jiraDomain, onUpdate, onRemo
       <EditableCell
         value={entry.timeSpent}
         label={`Time spent for ${name}`}
-        onSave={(val) => onUpdate(entry.id, { timeSpent: val.trim() })}
+        onSave={(val) => onUpdate(entry.id, { timeSpent: val.trim(), suggestion: undefined })}
         isInvalid={!!errors.timeSpent}
         errorMessage={errors.timeSpent}
         disabled={locked}
@@ -182,11 +188,23 @@ const EntryRow: React.FC<EntryRowProps> = ({ entry, jiraDomain, onUpdate, onRemo
         value={entry.comment}
         type="textarea"
         label={`Comment for ${name}`}
-        onSave={(val) => onUpdate(entry.id, { comment: val })}
+        onSave={(val) => onUpdate(entry.id, { comment: val, suggestion: undefined })}
         disabled={locked}
         className="col-span-2 md:col-span-1 text-sm"
       />
-      <StatusLozenge status={entry.status} message={entry.errorMessage || Object.values(errors)[0]} />
+      <div className="flex flex-col gap-0.5">
+        <StatusLozenge status={entry.status} message={entry.errorMessage || Object.values(errors)[0]} />
+        {entry.suggestion && entry.status === 'ready' && (
+          <span
+            className="lozenge bg-[var(--off-bg)] text-[var(--off)] w-fit"
+            title={entry.suggestion === 'in-progress'
+              ? 'No ticket activity this day; the ticket was assigned to you and in a working status'
+              : 'No ticket activity this day; carried over from the last active day'}
+          >
+            Suggested · {entry.suggestion === 'in-progress' ? 'in progress' : 'carried over'}
+          </span>
+        )}
+      </div>
     </li>
   );
 };
