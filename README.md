@@ -65,6 +65,11 @@ Then, per day:
   ├── Issue already has your worklog → "synced" row with the REAL logged time (locked)
   ├── Free time = daily target − all your logged time that day (on any issue)
   ├── Free time split over the new tickets in minutes; the parts sum exactly to the free time
+  ├── No new ticket that day, but free time left (every active ticket already has a partial worklog,
+  │   for example a short one posted from an AI session) → "Top-up" rows: the free time is split equally
+  │   over those tickets as extra rows beside their locked synced rows, so the day still reaches the
+  │   target. Existing worklogs in Jira are never edited. Leave tickets and issues outside the allowed
+  │   components get no top-up; once a top-up is synced, a new scan makes no more.
   └── No free time left → no new rows; the day is listed as "full" in the scan result
 
 Leave (HRMS, Settings "Read leave from HRMS", default on):
