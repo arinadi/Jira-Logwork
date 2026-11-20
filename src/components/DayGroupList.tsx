@@ -228,6 +228,14 @@ const EntryRow: React.FC<EntryRowProps> = ({ entry, jiraDomain, onUpdate, onRemo
       />
       <div className="flex flex-col gap-0.5">
         <StatusLozenge status={entry.status} message={entry.errorMessage || Object.values(errors)[0]} />
+        {entry.topUp && (
+          <span
+            className="lozenge bg-[var(--off-bg)] text-[var(--off)] w-fit"
+            title="Extra time beside the worklog this ticket already has that day, so the day reaches its target"
+          >
+            Top-up
+          </span>
+        )}
         {entry.suggestion && entry.status === 'ready' && (
           <span
             className="lozenge bg-[var(--off-bg)] text-[var(--off)] w-fit"

@@ -1,6 +1,8 @@
 import type { WorklogEntry } from '../types/worklog';
 
-const dayKey = (e: WorklogEntry) => `${e.issueKey}::${e.date}`;
+// A top-up row has its own key: it lives beside the synced row of the same issue and day, so the synced row must
+// not drop it, and a new scan replaces an unsynced top-up row only by another top-up row.
+const dayKey = (e: WorklogEntry) => `${e.issueKey}::${e.date}${e.topUp ? '::top-up' : ''}`;
 
 /**
  * Adds the rows of a new scan to the workspace without duplicating issue + day.

@@ -240,7 +240,9 @@ describe('jiraFetcher.fetchEvents', () => {
 
     const result = await scan({ jql: 'project = A', startDate: '2026-10-06', endDate: '2026-10-06' });
 
-    const rows = result.entries.map(e => ({ issueKey: e.issueKey, timeSpent: e.timeSpent, status: e.status }));
+    // This day has 7h 30m logged and no new ticket, so the scan also adds top-up rows for the free 30m (see the
+    // top-up tests); this test is about the synced rows only.
+    const rows = result.entries.filter(e => e.status === 'synced').map(e => ({ issueKey: e.issueKey, timeSpent: e.timeSpent, status: e.status }));
     expect(rows).toEqual([
       { issueKey: 'A-1', timeSpent: '2h', status: 'synced' },
       { issueKey: 'B-9', timeSpent: '5h 30m', status: 'synced' },
@@ -663,6 +665,106 @@ describe('jiraFetcher.fetchEvents', () => {
 
       expect(result.entries.filter(e => e.date === '2026-03-31').map(e => [e.issueKey, e.suggestion])).toEqual([['A-1', 'carry-over']]);
     });
+  });
+});
+
+describe('jiraFetcher.fetchEvents top-up', () => {
+  // Tue 6 Oct 2026. A short worklog already in Jira (for example 15 min posted from an AI session) must not leave the
+  // day short of the target when no ticket without a worklog is left to take the free time.
+  const DAY = '2026-10-06';
+  const at = (time: string) => `${DAY}T${time}:00.000+0700`;
+  const comment = (text: string) => [{ author: ME, created: at('10:00'), text }];
+  const logged = (minutes: number): FakeWorklog[] => [{ author: ME, started: at('09:00'), timeSpentSeconds: minutes * 60 }];
+  const minutes = (t: string) => {
+    const m = t.match(/^(?:(\d+)h)?\s*(?:(\d+)m)?$/);
+    if (!m) throw new Error(`not a Jira duration: ${t}`);
+    return Number(m[1] || 0) * 60 + Number(m[2] || 0);
+  };
+  const ready = (entries: WorklogEntry[]) => entries.filter(e => e.status === 'ready');
+
+  it('tops the day up to the target on the ticket that already has a partial worklog', async () => {
+    fakeJira({ issues: [{ key: 'A-1', comments: comment('investigating the queue'), worklogs: logged(15) }] });
+
+    const result = await scan({ startDate: DAY, endDate: DAY, defaultTime: '8h' });
+
+    expect(result.entries.map(e => [e.issueKey, e.timeSpent, e.status, e.topUp])).toEqual([
+      ['A-1', '15m', 'synced', undefined],
+      ['A-1', '7h 45m', 'ready', true],
+    ]);
+    expect(ready(result.entries)[0].comment).toBe('investigating the queue');
+  });
+
+  it('splits the free time equally over several partial tickets and adds up exactly', async () => {
+    fakeJira({ issues: [
+      { key: 'A-1', comments: comment('one'), worklogs: logged(15) },
+      { key: 'A-2', comments: comment('two'), worklogs: logged(45) },
+    ] });
+
+    const even = await scan({ startDate: DAY, endDate: DAY, defaultTime: '8h' });
+
+    expect(ready(even.entries).map(e => [e.issueKey, e.timeSpent, e.topUp])).toEqual([
+      ['A-1', '3h 30m', true],
+      ['A-2', '3h 30m', true],
+    ]);
+
+    // 15m + 44m logged leaves 421 min: the parts differ by one minute at most and still sum to 421.
+    fakeJira({ issues: [
+      { key: 'A-1', comments: comment('one'), worklogs: logged(15) },
+      { key: 'A-2', comments: comment('two'), worklogs: logged(44) },
+    ] });
+    const odd = await scan({ startDate: DAY, endDate: DAY, defaultTime: '8h' });
+    const parts = ready(odd.entries).map(e => minutes(e.timeSpent));
+    expect(parts).toHaveLength(2);
+    expect(parts.reduce((a, b) => a + b, 0)).toBe(421);
+    expect(Math.max(...parts) - Math.min(...parts)).toBeLessThanOrEqual(1);
+  });
+
+  it('does not top up when the day has a new ticket: the new ticket takes all the free time as before', async () => {
+    fakeJira({ issues: [
+      { key: 'A-1', comments: comment('partial'), worklogs: logged(15) },
+      { key: 'A-2', comments: comment('new work') },
+    ] });
+
+    const result = await scan({ startDate: DAY, endDate: DAY, defaultTime: '8h' });
+
+    expect(ready(result.entries).map(e => [e.issueKey, e.timeSpent, e.topUp])).toEqual([['A-2', '7h 45m', undefined]]);
+  });
+
+  it('never tops up a leave ticket and counts what is logged on it before topping up the others', async () => {
+    // Mon 30 Mar 2026: 4h HRMS leave logged on leave ticket L-1; B-1 has 1h logged. 8h - 4h (leave ticket) - 1h = 3h free.
+    fakeJira({ issues: [
+      { key: 'L-1', components: ['HR'], worklogs: [{ author: ME, started: '2026-03-30T08:00:00.000+0700', timeSpentSeconds: 4 * 3600, text: 'Long service leave' }] },
+      { key: 'B-1', components: ['DES-Systems'], comments: [{ author: ME, created: '2026-03-30T10:00:00.000+0700', text: 'fixing' }],
+        worklogs: [{ author: ME, started: '2026-03-30T09:00:00.000+0700', timeSpentSeconds: 3600 }] },
+    ] });
+
+    const result = await scan({
+      startDate: '2026-03-30', endDate: '2026-03-30', allowedComponents: ['DES-Systems'],
+      leaveMinutesByDay: { '2026-03-30': 240 }, leaveTickets: ['L-1'],
+    });
+
+    expect(ready(result.entries).map(e => [e.issueKey, e.timeSpent, e.topUp])).toEqual([['B-1', '3h', true]]);
+    expect(result.entries.find(e => e.issueKey === 'L-1')?.topUp).toBeUndefined();
+  });
+
+  it('never tops up an issue outside the allowed components', async () => {
+    fakeJira({ issues: [
+      { key: 'A-1', components: ['DES-Systems'], comments: comment('mine'), worklogs: logged(60) },
+      { key: 'A-2', components: ['HR'], comments: comment('elsewhere'), worklogs: logged(60) },
+    ] });
+
+    const result = await scan({ startDate: DAY, endDate: DAY, defaultTime: '8h', allowedComponents: ['DES-Systems'] });
+
+    expect(ready(result.entries).map(e => [e.issueKey, e.timeSpent, e.topUp])).toEqual([['A-1', '6h', true]]);
+    expect(result.entries.find(e => e.issueKey === 'A-2')?.status).toBe('synced');
+  });
+
+  it('makes no top-up on a day that is already at the target', async () => {
+    fakeJira({ issues: [{ key: 'A-1', comments: comment('long day'), worklogs: logged(8 * 60) }] });
+
+    const result = await scan({ startDate: DAY, endDate: DAY, defaultTime: '8h' });
+
+    expect(ready(result.entries)).toEqual([]);
   });
 });
 

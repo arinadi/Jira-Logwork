@@ -11,6 +11,11 @@ export interface WorklogEntry {
   originalRowIndex: number;
   /** Set on rows the scan guessed for a day without ticket activity; cleared when the user accepts or edits. */
   suggestion?: 'in-progress' | 'carry-over';
+  /**
+   * Extra time on an issue that already has a worklog that day, so the day still reaches its target when no new
+   * ticket is left to take it. It sits beside the locked synced row of the same issue and day.
+   */
+  topUp?: true;
 }
 
 export interface FieldMapping {

@@ -430,6 +430,14 @@ export const jiraFetcher = {
       if (newTickets.length > 0 && freeMinutes === 0 && !onFullLeave) fullDays.push(date);
       const parts = splitMinutes(freeMinutes, newTickets.length || 1);
       const newMinutes = new Map(newTickets.map((k, i) => [k, parts[i]]));
+      // Generated text: [own comment that day] | Status: A → B, B → C — else the issue summary.
+      const generatedCommentOf = (ticket: (typeof ticketsOnDay)[number]) => {
+        const transitionText = ticket.transitions.join(', ');
+        const commentParts = [];
+        if (ticket.comment) commentParts.push(ticket.comment);
+        if (transitionText) commentParts.push(`Status: ${transitionText}`);
+        return commentParts.join(' | ') || ticket.summary;
+      };
 
       for (const ticket of ticketsOnDay) {
         const existingKey = `${ticket.issueKey}::${date}`;
@@ -439,12 +447,7 @@ export const jiraFetcher = {
         if (!hasExistingWorklog && !newMinutes.get(ticket.issueKey)) continue;
         const existingWorklogComment = logged?.comment;
 
-        // Generated text: [own comment that day] | Status: A → B, B → C — else the issue summary.
-        const transitionText = ticket.transitions.join(', ');
-        const commentParts = [];
-        if (ticket.comment) commentParts.push(ticket.comment);
-        if (transitionText) commentParts.push(`Status: ${transitionText}`);
-        const generatedComment = commentParts.join(' | ') || ticket.summary;
+        const generatedComment = generatedCommentOf(ticket);
         // A synced row shows what is in Jira; generated text only fills an empty worklog comment.
         const finalComment = hasExistingWorklog ? existingWorklogComment || generatedComment : generatedComment;
 
@@ -457,6 +460,29 @@ export const jiraFetcher = {
           comment: finalComment,
           status: hasExistingWorklog ? 'synced' : 'ready',
           originalRowIndex: entries.length,
+        });
+      }
+
+      // No new ticket left to take the free time, but every active ticket already has a partial worklog: top those
+      // up (extra rows beside the locked synced ones; what is in Jira is never edited) so the day reaches its target.
+      // Leave tickets and issues outside the allowed components get none, like new rows.
+      if (newTickets.length === 0 && freeMinutes > 0 && !onFullLeave) {
+        const topUpTickets = ticketsOnDay
+          .filter(t => !leaveTicketSet.has(t.issueKey) && isAllowed(t.issueKey))
+          .sort((a, b) => a.issueKey.localeCompare(b.issueKey));
+        const topUpParts = splitMinutes(freeMinutes, topUpTickets.length || 1);
+        topUpTickets.forEach((ticket, i) => {
+          if (!topUpParts[i]) return;
+          entries.push({
+            id: crypto.randomUUID(),
+            issueKey: ticket.issueKey,
+            date,
+            timeSpent: minutesToJiraTime(topUpParts[i]),
+            comment: generatedCommentOf(ticket),
+            status: 'ready',
+            originalRowIndex: entries.length,
+            topUp: true,
+          });
         });
       }
     }
